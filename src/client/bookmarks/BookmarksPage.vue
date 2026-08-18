@@ -3,7 +3,9 @@ import { computed, nextTick, onMounted, onUnmounted, ref, shallowRef, watch } fr
 import { useRoute, useRouter } from 'vue-router';
 
 import { SYSTEM_ROOT_FOLDER_ID } from '../../shared/bookmarks/contracts';
+import type { Bookmark, BookmarkCommand, BookmarkFolder } from '../../shared/bookmarks/contracts';
 import BookmarkCard from './BookmarkCard.vue';
+import BookmarkEditorModal from './BookmarkEditorModal.vue';
 import { createFetchBookmarkAdapter, createIndexedDbBookmarkAdapter } from './bookmark-adapters';
 import { createWorkerBookmarkSearchAdapter } from './bookmark-search';
 import { createBookmarkState, type BookmarkStateView } from './bookmark-state';
@@ -15,6 +17,12 @@ const drawerOpen = ref(false);
 const initialized = ref(false);
 const searchInput = ref<HTMLInputElement>();
 const selectedSearchResult = ref(0);
+const editor = ref<{
+  kind: 'folder' | 'bookmark';
+  folder?: BookmarkFolder;
+  bookmark?: Bookmark;
+} | null>(null);
+const desktopEditingAvailable = ref(false);
 const stateModule = createBookmarkState({
   remote: createFetchBookmarkAdapter(),
   storage: createIndexedDbBookmarkAdapter(),
@@ -22,6 +30,11 @@ const stateModule = createBookmarkState({
 });
 const state = shallowRef<BookmarkStateView>(stateModule.getState());
 let unsubscribe: (() => void) | undefined;
+let desktopMedia: MediaQueryList | undefined;
+const updateDesktopEditing = () => {
+  desktopEditingAvailable.value = desktopMedia?.matches ?? false;
+  if (!desktopEditingAvailable.value) editor.value = null;
+};
 
 const searchOpen = computed(() => state.value.searchQuery.trim().length > 0);
 const selectedResultId = computed(() =>
@@ -111,7 +124,78 @@ const formatSyncTime = (value: string | null) =>
       )
     : 'Never';
 
+const selectedSequence = computed(() =>
+  state.value.selectedFolder
+    ? state.value.sequences.find((sequence) => sequence.folderId === state.value.selectedFolder?.id)
+    : undefined,
+);
+
+const openFolderEditor = (folder?: BookmarkFolder) => {
+  editor.value = { kind: 'folder', ...(folder ? { folder } : {}) };
+};
+
+const openBookmarkEditor = (bookmark?: Bookmark) => {
+  editor.value = { kind: 'bookmark', ...(bookmark ? { bookmark } : {}) };
+};
+
+const saveEditor = async (value: {
+  name?: string;
+  url?: string;
+  title?: string;
+  note?: string;
+  tags?: string[];
+}) => {
+  const activeEditor = editor.value;
+  const selectedFolder = state.value.selectedFolder;
+  if (!activeEditor || !selectedFolder) return;
+  let command: BookmarkCommand;
+  if (activeEditor.kind === 'folder') {
+    command = activeEditor.folder
+      ? {
+          type: 'editFolder',
+          operationId: crypto.randomUUID(),
+          folderId: activeEditor.folder.id,
+          folderVersion: activeEditor.folder.version,
+          name: value.name ?? '',
+        }
+      : {
+          type: 'createFolder',
+          operationId: crypto.randomUUID(),
+          parentId: selectedFolder.id,
+          parentFolderVersion: selectedSequence.value?.folderVersion ?? 1,
+          name: value.name ?? '',
+        };
+  } else {
+    command = activeEditor.bookmark
+      ? {
+          type: 'editBookmark',
+          operationId: crypto.randomUUID(),
+          bookmarkId: activeEditor.bookmark.id,
+          bookmarkVersion: activeEditor.bookmark.version,
+          url: value.url ?? '',
+          title: value.title ?? '',
+          note: value.note ?? '',
+          tags: value.tags ?? [],
+        }
+      : {
+          type: 'createBookmark',
+          operationId: crypto.randomUUID(),
+          folderId: selectedFolder.id,
+          parentBookmarkVersion: selectedSequence.value?.bookmarkVersion ?? 1,
+          url: value.url ?? '',
+          title: value.title || undefined,
+          note: value.note ?? '',
+          tags: value.tags ?? [],
+        };
+  }
+  const result = await stateModule.executeCommand(command);
+  if (result?.status === 'acknowledged') editor.value = null;
+};
+
 onMounted(async () => {
+  desktopMedia = window.matchMedia('(min-width: 761px)');
+  desktopMedia.addEventListener('change', updateDesktopEditing);
+  updateDesktopEditing();
   document.addEventListener('keydown', handleGlobalKeydown);
   unsubscribe = stateModule.subscribe((replacement) => {
     state.value = replacement;
@@ -146,6 +230,7 @@ onUnmounted(() => {
   document.removeEventListener('keydown', handleGlobalKeydown);
   unsubscribe?.();
   stateModule.dispose();
+  desktopMedia?.removeEventListener('change', updateDesktopEditing);
 });
 </script>
 
@@ -171,6 +256,22 @@ onUnmounted(() => {
 
     <div class="bookmarks-workspace">
       <p v-if="state.notice" class="navigation-notice" role="status">{{ state.notice }}</p>
+
+      <div
+        v-if="state.writeStatus !== 'idle'"
+        class="write-status"
+        :class="state.writeStatus"
+        role="status"
+      >
+        <span>{{ state.writeMessage }}</span>
+        <button
+          v-if="state.writeStatus === 'unknown' && state.unconfirmedOperations[0]"
+          type="button"
+          @click="stateModule.retryUnconfirmed(state.unconfirmedOperations[0].command.operationId)"
+        >
+          Retry same operation
+        </button>
+      </div>
 
       <div
         v-if="state.syncStatus !== 'idle'"
@@ -312,9 +413,23 @@ onUnmounted(() => {
             <span class="eyebrow">Current Folder</span>
             <h1 id="bookmarks-title">{{ state.selectedFolder?.name || 'Bookmarks' }}</h1>
           </div>
-          <span class="item-count">
-            {{ state.directFolders.length }} Folders · {{ state.directBookmarks.length }} Bookmarks
-          </span>
+          <div class="library-actions">
+            <span class="item-count">
+              {{ state.directFolders.length }} Folders ·
+              {{ state.directBookmarks.length }} Bookmarks
+            </span>
+            <div v-if="desktopEditingAvailable" class="desktop-edit-controls">
+              <button type="button" @click="openFolderEditor()">New Folder</button>
+              <button type="button" @click="openBookmarkEditor()">New Bookmark</button>
+              <button
+                v-if="state.selectedFolder && state.selectedFolder.id !== SYSTEM_ROOT_FOLDER_ID"
+                type="button"
+                @click="openFolderEditor(state.selectedFolder)"
+              >
+                Edit Folder
+              </button>
+            </div>
+          </div>
         </header>
 
         <section
@@ -324,16 +439,22 @@ onUnmounted(() => {
         >
           <h2 id="folders-title">Folders</h2>
           <div class="folder-grid">
-            <button
-              v-for="folder in state.directFolders"
-              :key="folder.id"
-              type="button"
-              @click="navigateToFolder(folder.id)"
-            >
-              <span class="folder-icon" aria-hidden="true">⌑</span>
-              <span>{{ folder.name }}</span>
-              <span aria-hidden="true">→</span>
-            </button>
+            <div v-for="folder in state.directFolders" :key="folder.id" class="folder-tile">
+              <button type="button" @click="navigateToFolder(folder.id)">
+                <span class="folder-icon" aria-hidden="true">⌑</span>
+                <span>{{ folder.name }}</span>
+                <span aria-hidden="true">→</span>
+              </button>
+              <button
+                v-if="desktopEditingAvailable"
+                class="tile-edit desktop-edit-controls"
+                type="button"
+                :aria-label="`Edit ${folder.name}`"
+                @click="openFolderEditor(folder)"
+              >
+                Edit
+              </button>
+            </div>
           </div>
         </section>
 
@@ -349,6 +470,8 @@ onUnmounted(() => {
               :key="bookmark.id"
               :bookmark="bookmark"
               :tags="state.tagsByBookmark[bookmark.id] ?? []"
+              :editable="desktopEditingAvailable"
+              @edit="openBookmarkEditor(bookmark)"
             />
           </div>
         </section>
@@ -393,5 +516,16 @@ onUnmounted(() => {
         />
       </aside>
     </div>
+
+    <BookmarkEditorModal
+      v-if="editor && desktopEditingAvailable"
+      :kind="editor.kind"
+      :folder="editor.folder"
+      :bookmark="editor.bookmark"
+      :tags="editor.bookmark ? (state.tagsByBookmark[editor.bookmark.id] ?? []) : []"
+      :saving="state.writeStatus === 'pending'"
+      @close="editor = null"
+      @save="saveEditor"
+    />
   </section>
 </template>

@@ -112,6 +112,91 @@ try {
     await page.waitForURL(`**/bookmarks/10000000-0000-4000-8000-000000000001`);
     await page.getByRole('heading', { level: 1, name: 'Reading' }).waitFor();
 
+    await page.getByRole('button', { name: 'New Folder' }).click();
+    const folderNameInput = page.getByLabel('Folder name');
+    await folderNameInput.fill('Draft Folder');
+    await page.getByRole('button', { name: 'Cancel' }).click();
+    await page.getByText('Discard your unsaved changes?').waitFor();
+    await page.getByRole('button', { name: 'Keep editing' }).click();
+    if (!(await folderNameInput.isVisible())) {
+      throw new Error('Dirty-form protection dismissed the Folder editor unexpectedly.');
+    }
+    await page.getByRole('button', { name: 'Cancel' }).click();
+    await page.getByRole('button', { name: 'Discard' }).click();
+
+    await page.getByRole('button', { name: 'New Folder' }).click();
+    await page.getByLabel('Folder name').fill('UI Folder');
+    await page.getByRole('button', { name: 'Save' }).click();
+    await page.getByRole('dialog').waitFor({ state: 'detached' });
+    await page.locator('.folder-grid').getByText('UI Folder', { exact: true }).waitFor();
+    await page.getByRole('button', { name: 'Edit UI Folder' }).click();
+    await page.getByLabel('Folder name').fill('UI Folder Renamed');
+    await page.getByRole('button', { name: 'Save' }).click();
+    await page.getByRole('dialog').waitFor({ state: 'detached' });
+    await page.locator('.folder-grid').getByText('UI Folder Renamed', { exact: true }).waitFor();
+
+    await page.getByRole('button', { name: 'New Bookmark' }).click();
+    await page.getByLabel('URL').fill('https://example.org/ui');
+    await page.getByLabel('Title').fill('UI Bookmark');
+    await page.getByLabel(/Tags/).fill(' Beta, alpha, beta ');
+    await page.getByLabel('Note').fill('Created through the complete Worker.');
+    await page.getByRole('button', { name: 'Save' }).click();
+    await page.getByRole('dialog').waitFor({ state: 'detached' });
+    await page.getByRole('link', { name: /UI Bookmark/ }).waitFor();
+    await page
+      .locator('.bookmark-card-shell', { hasText: 'UI Bookmark' })
+      .locator('.bookmark-edit-button')
+      .click();
+    await page.getByLabel('Title').fill('UI Bookmark Edited');
+    await page.getByRole('button', { name: 'Save' }).click();
+    await page.getByRole('dialog').waitFor({ state: 'detached' });
+    await page.getByRole('link', { name: /UI Bookmark Edited/ }).waitFor();
+
+    await page.route('**/api/bookmarks/commands', async (route) => {
+      await delay(1_200);
+      await route.continue();
+    });
+    await page
+      .locator('.bookmark-card-shell', { hasText: 'UI Bookmark Edited' })
+      .locator('.bookmark-edit-button')
+      .click();
+    await page.getByLabel('Note').fill('A deliberately slow update.');
+    await page.getByRole('button', { name: 'Save' }).click();
+    await page.getByText('Still saving changes…').waitFor({ timeout: 2_000 });
+    await page.getByRole('dialog').waitFor({ state: 'detached' });
+    await page.unrouteAll({ behavior: 'wait' });
+
+    await page.route('**/api/bookmarks/commands', (route) =>
+      route.fulfill({ status: 500, contentType: 'application/json', body: '{}' }),
+    );
+    await page
+      .locator('.bookmark-card-shell', { hasText: 'UI Bookmark Edited' })
+      .locator('.bookmark-edit-button')
+      .click();
+    await page.getByLabel('Note').fill('This update must fail.');
+    await page.getByRole('button', { name: 'Save' }).click();
+    await page.getByText('The change was not saved.').waitFor();
+    if (!(await page.getByRole('dialog').isVisible())) {
+      throw new Error('A failed save dismissed the Bookmark editor.');
+    }
+    await page.getByRole('button', { name: 'Cancel' }).click();
+    await page.getByRole('button', { name: 'Discard' }).click();
+    await page.unrouteAll({ behavior: 'wait' });
+
+    await page.route('**/api/bookmarks/commands', (route) => route.abort('connectionfailed'));
+    await page
+      .locator('.bookmark-card-shell', { hasText: 'UI Bookmark Edited' })
+      .locator('.bookmark-edit-button')
+      .click();
+    await page.getByLabel('Note').fill('This update has an unknown result.');
+    await page.getByRole('button', { name: 'Save' }).click();
+    await page.getByText(/save result is unknown/i).waitFor();
+    await page.getByRole('button', { name: 'Cancel' }).click();
+    await page.getByRole('button', { name: 'Discard' }).click();
+    await page.unrouteAll({ behavior: 'wait' });
+    await page.getByRole('button', { name: 'Retry same operation' }).click();
+    await page.getByText('The save result is unknown.').waitFor({ state: 'detached' });
+
     const bookmarkAnchor = page.getByRole('link', { name: /Example Reference/ });
     if ((await bookmarkAnchor.getAttribute('href')) !== 'https://example.com/reference') {
       throw new Error('The Bookmark card is not a native destination anchor.');

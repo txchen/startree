@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 
-import { SYSTEM_ROOT_FOLDER_ID, type BookmarkSnapshot } from '../../shared/bookmarks/contracts';
+import {
+  SYSTEM_ROOT_FOLDER_ID,
+  type BookmarkCommandResult,
+  type BookmarkSnapshot,
+} from '../../shared/bookmarks/contracts';
 import { createApp } from './create-app';
 
 const bindings = {
@@ -31,6 +35,16 @@ const createTestApp = () =>
   createApp<typeof bindings>({
     readBookmarkRevision: () => Promise.resolve(7),
     readBookmarkSnapshot: () => Promise.resolve(snapshot),
+    executeBookmarkCommand: (command) =>
+      Promise.resolve({
+        status: 'acknowledged',
+        operationId: command.operationId,
+        revision: 8,
+        folders: [],
+        bookmarks: [],
+        tags: [],
+        sequences: [],
+      } satisfies BookmarkCommandResult),
   });
 
 describe('platform API', () => {
@@ -84,5 +98,115 @@ describe('platform API', () => {
     expect(response.headers.get('etag')).toBe('"bookmarks-1-7"');
     expect(response.headers.get('cache-control')).toBe('private, no-store');
     await expect(response.text()).resolves.toBe('');
+  });
+
+  it('validates and executes a shared Bookmark command', async () => {
+    const response = await createTestApp().request(
+      'http://startree.local/api/bookmarks/commands',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Origin: 'http://startree.local' },
+        body: JSON.stringify({
+          type: 'createFolder',
+          operationId: 'a0000000-0000-4000-8000-000000000001',
+          parentId: SYSTEM_ROOT_FOLDER_ID,
+          parentFolderVersion: 1,
+          name: 'Reading',
+        }),
+      },
+      bindings,
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      status: 'acknowledged',
+      operationId: 'a0000000-0000-4000-8000-000000000001',
+      revision: 8,
+    });
+  });
+
+  it('maps structured command conflicts to 409', async () => {
+    const app = createApp<typeof bindings>({
+      readBookmarkRevision: () => Promise.resolve(7),
+      readBookmarkSnapshot: () => Promise.resolve(snapshot),
+      executeBookmarkCommand: (command) =>
+        Promise.resolve({
+          status: 'conflict',
+          operationId: command.operationId,
+          code: 'stale_entity',
+          revision: 7,
+          folders: [],
+          bookmarks: [],
+          tags: [],
+          sequences: [],
+        }),
+    });
+    const response = await app.request(
+      'http://startree.local/api/bookmarks/commands',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Origin: 'http://startree.local' },
+        body: JSON.stringify({
+          type: 'editFolder',
+          operationId: 'a0000000-0000-4000-8000-000000000002',
+          folderId: '10000000-0000-4000-8000-000000000001',
+          folderVersion: 1,
+          name: 'Saved',
+        }),
+      },
+      bindings,
+    );
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toMatchObject({
+      status: 'conflict',
+      code: 'stale_entity',
+    });
+  });
+
+  it.each([
+    [
+      { 'Content-Type': 'text/plain', Origin: 'http://startree.local' },
+      415,
+      'unsupported_media_type',
+    ],
+    [
+      { 'Content-Type': 'application/json', Origin: 'https://attacker.example' },
+      403,
+      'invalid_origin',
+    ],
+    [
+      {
+        'Content-Type': 'application/json',
+        Origin: 'http://startree.local',
+        'Content-Length': String(1024 * 1024 + 1),
+      },
+      413,
+      'request_too_large',
+    ],
+  ])('rejects an unsafe command request', async (headers, status, code) => {
+    const response = await createTestApp().request(
+      'http://startree.local/api/bookmarks/commands',
+      { method: 'POST', headers, body: '{}' },
+      bindings,
+    );
+
+    expect(response.status).toBe(status);
+    await expect(response.json()).resolves.toMatchObject({ error: { code } });
+  });
+
+  it('returns a structured validation error for malformed commands', async () => {
+    const response = await createTestApp().request(
+      'http://startree.local/api/bookmarks/commands',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Origin: 'http://startree.local' },
+        body: JSON.stringify({ type: 'createFolder' }),
+      },
+      bindings,
+    );
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toMatchObject({ error: { code: 'invalid_command' } });
   });
 });

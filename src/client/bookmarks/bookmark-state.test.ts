@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { SYSTEM_ROOT_FOLDER_ID, type BookmarkSnapshot } from '../../shared/bookmarks/contracts';
 import { createBookmarkState } from './bookmark-state';
 import { createMiniSearchBookmarkAdapter } from './bookmark-search';
+import { UnknownBookmarkCommandError } from './bookmark-adapters';
 import {
   createMemoryBookmarkLifecycleAdapter,
   createMemoryBookmarkRemoteAdapter,
@@ -419,6 +420,179 @@ describe('Bookmark state Module Interface', () => {
         folderPath: 'Bookmarks / Reading',
       },
     ]);
+    state.dispose();
+  });
+
+  it('optimistically presents a write immediately and merges its authoritative result', async () => {
+    let settle:
+      | ((value: import('../../shared/bookmarks/contracts').BookmarkCommandResult) => void)
+      | undefined;
+    const remote = createMemoryBookmarkRemoteAdapter(snapshot());
+    remote.executeCommand = () =>
+      new Promise((resolve) => {
+        settle = resolve;
+      });
+    const state = createBookmarkState({
+      remote,
+      storage: createMemoryBookmarkStorageAdapter(),
+      lifecycle: createMemoryBookmarkLifecycleAdapter(),
+    });
+    await state.initialize({ folderId });
+    const command = {
+      type: 'createFolder' as const,
+      operationId: 'a0000000-0000-4000-8000-000000000001',
+      parentId: folderId,
+      parentFolderVersion: 1,
+      name: 'Optimistic',
+    };
+
+    const write = state.executeCommand(command);
+    expect(state.getState()).toMatchObject({ writeStatus: 'pending' });
+    expect(state.getState().directFolders.map((folder) => folder.name)).toContain('Optimistic');
+    settle?.({
+      status: 'acknowledged',
+      operationId: command.operationId,
+      revision: 2,
+      folders: [
+        {
+          id: '80000000-0000-4000-8000-000000000001',
+          name: 'Optimistic',
+          parentId: folderId,
+          rank: 'z',
+          createdAt: '2026-08-18T12:00:00.000Z',
+          modifiedAt: '2026-08-18T12:00:00.000Z',
+          version: 1,
+        },
+      ],
+      bookmarks: [],
+      tags: [],
+      sequences: [{ folderId, folderVersion: 2, bookmarkVersion: 1 }],
+    });
+    await write;
+
+    expect(state.getState()).toMatchObject({ writeStatus: 'idle', snapshotRevision: 2 });
+    expect(state.getState().directFolders).toContainEqual(
+      expect.objectContaining({ id: '80000000-0000-4000-8000-000000000001' }),
+    );
+    state.dispose();
+  });
+
+  it('rolls back a failed optimistic write', async () => {
+    const remote = createMemoryBookmarkRemoteAdapter(snapshot());
+    remote.executeCommand = () => Promise.reject(new Error('rejected'));
+    const state = createBookmarkState({
+      remote,
+      storage: createMemoryBookmarkStorageAdapter(),
+      lifecycle: createMemoryBookmarkLifecycleAdapter(),
+    });
+    await state.initialize({ folderId });
+
+    await state.executeCommand({
+      type: 'editFolder',
+      operationId: 'a0000000-0000-4000-8000-000000000002',
+      folderId,
+      folderVersion: 1,
+      name: 'Changed',
+    });
+
+    expect(state.getState()).toMatchObject({
+      writeStatus: 'failed',
+      selectedFolder: { name: 'Reading' },
+    });
+    state.dispose();
+  });
+
+  it('records unknown outcomes and refreshes before an explicit same-ID retry', async () => {
+    const storage = createMemoryBookmarkStorageAdapter();
+    const remote = createMemoryBookmarkRemoteAdapter(snapshot());
+    const operationIds: string[] = [];
+    remote.executeCommand = async (command) => {
+      operationIds.push(command.operationId);
+      if (operationIds.length === 1) {
+        throw new UnknownBookmarkCommandError('lost');
+      }
+      return {
+        status: 'acknowledged',
+        operationId: command.operationId,
+        revision: 2,
+        folders: [],
+        bookmarks: [],
+        tags: [],
+        sequences: [],
+      };
+    };
+    const state = createBookmarkState({
+      remote,
+      storage,
+      lifecycle: createMemoryBookmarkLifecycleAdapter(),
+    });
+    await state.initialize({ folderId });
+    const command = {
+      type: 'editFolder' as const,
+      operationId: 'a0000000-0000-4000-8000-000000000003',
+      folderId,
+      folderVersion: 1,
+      name: 'Changed',
+    };
+
+    await state.executeCommand(command);
+    expect(state.getState()).toMatchObject({ writeStatus: 'unknown' });
+    expect(await storage.readUnconfirmedOperations?.()).toEqual([
+      expect.objectContaining({ command }),
+    ]);
+
+    await state.retryUnconfirmed(command.operationId);
+
+    expect(operationIds).toEqual([command.operationId, command.operationId]);
+    expect(remote.requestedRevisions).toEqual([null, 1]);
+    expect(await storage.readUnconfirmedOperations?.()).toEqual([]);
+    state.dispose();
+  });
+
+  it('serializes writes so only one command is in flight', async () => {
+    const remote = createMemoryBookmarkRemoteAdapter(snapshot());
+    let active = 0;
+    let maximumActive = 0;
+    remote.executeCommand = async (command) => {
+      active += 1;
+      maximumActive = Math.max(maximumActive, active);
+      await Promise.resolve();
+      active -= 1;
+      return {
+        status: 'acknowledged',
+        operationId: command.operationId,
+        revision: 2,
+        folders: [],
+        bookmarks: [],
+        tags: [],
+        sequences: [],
+      };
+    };
+    const state = createBookmarkState({
+      remote,
+      storage: createMemoryBookmarkStorageAdapter(),
+      lifecycle: createMemoryBookmarkLifecycleAdapter(),
+    });
+    await state.initialize({ folderId });
+
+    await Promise.all([
+      state.executeCommand({
+        type: 'editFolder',
+        operationId: 'a0000000-0000-4000-8000-000000000004',
+        folderId,
+        folderVersion: 1,
+        name: 'One',
+      }),
+      state.executeCommand({
+        type: 'editFolder',
+        operationId: 'a0000000-0000-4000-8000-000000000005',
+        folderId,
+        folderVersion: 1,
+        name: 'Two',
+      }),
+    ]);
+
+    expect(maximumActive).toBe(1);
     state.dispose();
   });
 });

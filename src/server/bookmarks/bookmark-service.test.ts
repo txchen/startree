@@ -23,12 +23,17 @@ describe('Bookmark Service Interface', () => {
       }),
     );
     database = await miniflare.getD1Database('DB');
-    const migration = await readFile('migrations/0001_initial_bookmark_schema.sql', 'utf8');
-    for (const statement of migration
-      .split(';')
-      .map((sql) => sql.trim())
-      .filter(Boolean)) {
-      await database.prepare(statement).run();
+    for (const path of [
+      'migrations/0001_initial_bookmark_schema.sql',
+      'migrations/0002_bookmark_commands.sql',
+    ]) {
+      const migration = await readFile(path, 'utf8');
+      for (const statement of migration
+        .split(';')
+        .map((sql) => sql.trim())
+        .filter(Boolean)) {
+        await database.prepare(statement).run();
+      }
     }
   });
 
@@ -245,5 +250,183 @@ describe('Bookmark Service Interface', () => {
 
     expect(snapshot.folders.map((folder) => folder.name)).toEqual(['']);
     expect(snapshot.bookmarks).toEqual([]);
+  });
+
+  it('creates Folders with exact names, permits case variants, and settles repeated operations once', async () => {
+    const service = createBookmarkService(database, {
+      now: () => new Date(now),
+      randomUUID: (() => {
+        const ids = [
+          '70000000-0000-4000-8000-000000000001',
+          '70000000-0000-4000-8000-000000000002',
+        ];
+        return () => ids.shift()!;
+      })(),
+    });
+    const command = {
+      type: 'createFolder' as const,
+      operationId: 'a0000000-0000-4000-8000-000000000001',
+      parentId: SYSTEM_ROOT_FOLDER_ID,
+      parentFolderVersion: 1,
+      name: '  Work  ',
+    };
+
+    const first = await service.executeCommand(command);
+    const repeated = await service.executeCommand(command);
+    const caseVariant = await service.executeCommand({
+      ...command,
+      operationId: 'a0000000-0000-4000-8000-000000000002',
+      parentFolderVersion: 2,
+      name: '  work  ',
+    });
+
+    expect(first).toMatchObject({
+      status: 'acknowledged',
+      revision: 1,
+      folders: [{ name: '  Work  ', version: 1, createdAt: now, modifiedAt: now }],
+      sequences: [{ folderId: SYSTEM_ROOT_FOLDER_ID, folderVersion: 2 }],
+    });
+    expect(repeated).toEqual(first);
+    expect(caseVariant).toMatchObject({ status: 'acknowledged', revision: 2 });
+    expect((await service.getSnapshot()).folders.map((folder) => folder.name)).toEqual([
+      '',
+      '  Work  ',
+      '  work  ',
+    ]);
+  });
+
+  it('returns authoritative conflicts for exact sibling names and stale versions', async () => {
+    const service = createBookmarkService(database, {
+      now: () => new Date(now),
+      randomUUID: () => '71000000-0000-4000-8000-000000000001',
+    });
+    await service.executeCommand({
+      type: 'createFolder',
+      operationId: 'a1000000-0000-4000-8000-000000000001',
+      parentId: SYSTEM_ROOT_FOLDER_ID,
+      parentFolderVersion: 1,
+      name: 'Reading',
+    });
+
+    const duplicate = await service.executeCommand({
+      type: 'createFolder',
+      operationId: 'a1000000-0000-4000-8000-000000000002',
+      parentId: SYSTEM_ROOT_FOLDER_ID,
+      parentFolderVersion: 2,
+      name: 'Reading',
+    });
+    const stale = await service.executeCommand({
+      type: 'editFolder',
+      operationId: 'a1000000-0000-4000-8000-000000000003',
+      folderId: '71000000-0000-4000-8000-000000000001',
+      folderVersion: 99,
+      name: 'Saved',
+    });
+
+    expect(duplicate).toMatchObject({ status: 'conflict', code: 'name_conflict', revision: 1 });
+    expect(stale).toMatchObject({
+      status: 'conflict',
+      code: 'stale_entity',
+      folders: [{ id: '71000000-0000-4000-8000-000000000001', name: 'Reading', version: 1 }],
+    });
+  });
+
+  it('creates and edits duplicate-URL Bookmarks with normalized Tags and immutable creation time', async () => {
+    const ids = ['72000000-0000-4000-8000-000000000001', '72000000-0000-4000-8000-000000000002'];
+    let clock = now;
+    const service = createBookmarkService(database, {
+      now: () => new Date(clock),
+      randomUUID: () => ids.shift()!,
+    });
+    const created = await service.executeCommand({
+      type: 'createBookmark',
+      operationId: 'a2000000-0000-4000-8000-000000000001',
+      folderId: SYSTEM_ROOT_FOLDER_ID,
+      parentBookmarkVersion: 1,
+      url: 'https://example.com/path',
+      note: '',
+      tags: [' Travel ', 'travel', 'CAFÉ'],
+    });
+    await service.executeCommand({
+      type: 'createBookmark',
+      operationId: 'a2000000-0000-4000-8000-000000000002',
+      folderId: SYSTEM_ROOT_FOLDER_ID,
+      parentBookmarkVersion: 2,
+      url: 'https://example.com/path',
+      title: 'Duplicate',
+      note: '',
+      tags: [],
+    });
+    clock = '2026-08-18T13:00:00.000Z';
+    const edited = await service.executeCommand({
+      type: 'editBookmark',
+      operationId: 'a2000000-0000-4000-8000-000000000003',
+      bookmarkId: '72000000-0000-4000-8000-000000000001',
+      bookmarkVersion: 1,
+      url: 'http://example.org/new',
+      title: 'Updated',
+      note: 'Plain text <script>',
+      tags: [' zed ', 'Alpha'],
+    });
+
+    expect(created).toMatchObject({
+      status: 'acknowledged',
+      bookmarks: [{ title: 'example.com', createdAt: now }],
+      tags: [{ value: 'CAFÉ' }, { value: 'Travel' }],
+    });
+    expect(edited).toMatchObject({
+      status: 'acknowledged',
+      bookmarks: [
+        {
+          title: 'Updated',
+          note: 'Plain text <script>',
+          createdAt: now,
+          modifiedAt: clock,
+          version: 2,
+        },
+      ],
+      tags: [{ value: 'Alpha' }, { value: 'zed' }],
+    });
+    expect((await service.getSnapshot()).bookmarks).toHaveLength(2);
+  });
+
+  it('rolls back entity, sequence, revision, and idempotency changes when a command batch fails', async () => {
+    const service = createBookmarkService(database, {
+      now: () => new Date(now),
+      randomUUID: () => '73000000-0000-4000-8000-000000000001',
+    });
+    await service.executeCommand({
+      type: 'createFolder',
+      operationId: 'a3000000-0000-4000-8000-000000000001',
+      parentId: SYSTEM_ROOT_FOLDER_ID,
+      parentFolderVersion: 1,
+      name: 'First',
+    });
+
+    await expect(
+      service.executeCommand({
+        type: 'createFolder',
+        operationId: 'a3000000-0000-4000-8000-000000000002',
+        parentId: SYSTEM_ROOT_FOLDER_ID,
+        parentFolderVersion: 2,
+        name: 'Second',
+      }),
+    ).rejects.toThrow();
+
+    const snapshot = await service.getSnapshot();
+    expect(snapshot).toMatchObject({ revision: 1 });
+    expect(snapshot.folders.map((folder) => folder.name)).toEqual(['', 'First']);
+    expect(snapshot.sequences).toContainEqual({
+      folderId: SYSTEM_ROOT_FOLDER_ID,
+      folderVersion: 2,
+      bookmarkVersion: 1,
+    });
+    await expect(
+      database
+        .prepare('SELECT operation_id FROM bookmark_idempotency_results ORDER BY operation_id')
+        .all(),
+    ).resolves.toMatchObject({
+      results: [{ operation_id: 'a3000000-0000-4000-8000-000000000001' }],
+    });
   });
 });

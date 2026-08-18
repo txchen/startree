@@ -1,4 +1,4 @@
-import type { BookmarkSnapshot } from '../../shared/bookmarks/contracts';
+import type { BookmarkCommand, BookmarkSnapshot } from '../../shared/bookmarks/contracts';
 import type {
   BookmarkLifecycleAdapter,
   BookmarkNavigation,
@@ -37,6 +37,7 @@ export const createMemoryBookmarkStorageAdapter = (initial?: {
   let snapshot = initial?.snapshot ? structuredClone(initial.snapshot) : null;
   let navigation = initial?.navigation ? structuredClone(initial.navigation) : null;
   let synchronizedAt = initial?.synchronizedAt ?? null;
+  let unconfirmedOperations: Array<{ command: BookmarkCommand; recordedAt: string }> = [];
   const incompatibleWireFormatVersion = initial?.incompatibleWireFormatVersion;
   return {
     async readSnapshot() {
@@ -60,6 +61,21 @@ export const createMemoryBookmarkStorageAdapter = (initial?: {
     async clear() {
       snapshot = null;
       navigation = null;
+      unconfirmedOperations = [];
+    },
+    async readUnconfirmedOperations() {
+      return structuredClone(unconfirmedOperations);
+    },
+    async writeUnconfirmedOperation(command, recordedAt) {
+      unconfirmedOperations = [
+        ...unconfirmedOperations.filter((item) => item.command.operationId !== command.operationId),
+        { command: structuredClone(command), recordedAt },
+      ];
+    },
+    async removeUnconfirmedOperation(operationId) {
+      unconfirmedOperations = unconfirmedOperations.filter(
+        (item) => item.command.operationId !== operationId,
+      );
     },
   };
 };

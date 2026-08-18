@@ -1,5 +1,12 @@
-import type { Bookmark, BookmarkFolder, BookmarkSnapshot } from '../../shared/bookmarks/contracts';
-import { SYSTEM_ROOT_FOLDER_ID } from '../../shared/bookmarks/contracts';
+import type {
+  Bookmark,
+  BookmarkCommand,
+  BookmarkCommandResult,
+  BookmarkFolder,
+  BookmarkSequence,
+  BookmarkSnapshot,
+} from '../../shared/bookmarks/contracts';
+import { normalizeBookmarkTags, SYSTEM_ROOT_FOLDER_ID } from '../../shared/bookmarks/contracts';
 import type { BookmarkSearchAdapter, BookmarkSearchResult } from './bookmark-search';
 
 export type BookmarkNavigation = {
@@ -9,6 +16,12 @@ export type BookmarkNavigation = {
 
 export type BookmarkRemoteAdapter = {
   readSnapshot(revision: number | null, signal?: AbortSignal): Promise<BookmarkSnapshot | null>;
+  executeCommand?(command: BookmarkCommand, signal?: AbortSignal): Promise<BookmarkCommandResult>;
+};
+
+export type UnconfirmedBookmarkOperation = {
+  command: BookmarkCommand;
+  recordedAt: string;
 };
 
 export type StoredBookmarkSnapshot =
@@ -22,6 +35,9 @@ export type BookmarkStorageAdapter = {
   readNavigation(): Promise<BookmarkNavigation | null>;
   writeNavigation(navigation: BookmarkNavigation): Promise<void>;
   clear(): Promise<void>;
+  readUnconfirmedOperations?(): Promise<UnconfirmedBookmarkOperation[]>;
+  writeUnconfirmedOperation?(command: BookmarkCommand, recordedAt: string): Promise<void>;
+  removeUnconfirmedOperation?(operationId: string): Promise<void>;
 };
 
 export type BookmarkLifecycleAdapter = {
@@ -43,6 +59,7 @@ export type BookmarkStateView = Readonly<{
   breadcrumbs: readonly BookmarkFolder[];
   directFolders: readonly BookmarkFolder[];
   directBookmarks: readonly Bookmark[];
+  sequences: readonly BookmarkSequence[];
   tagsByBookmark: Readonly<Record<string, readonly string[]>>;
   expandedFolderIds: readonly string[];
   notice: string | null;
@@ -52,6 +69,9 @@ export type BookmarkStateView = Readonly<{
   coldLoadProgressVisible: boolean;
   searchQuery: string;
   searchResults: readonly BookmarkSearchResult[];
+  writeStatus: 'idle' | 'pending' | 'failed' | 'conflict' | 'unknown';
+  writeMessage: string | null;
+  unconfirmedOperations: readonly UnconfirmedBookmarkOperation[];
 }>;
 
 export type BookmarkState = {
@@ -63,6 +83,8 @@ export type BookmarkState = {
   search(query: string): Promise<void>;
   selectFolder(folderId: string): Promise<boolean>;
   toggleFolderExpanded(folderId: string): Promise<void>;
+  executeCommand(command: BookmarkCommand): Promise<BookmarkCommandResult | null>;
+  retryUnconfirmed(operationId: string): Promise<BookmarkCommandResult | null>;
   dispose(): void;
 };
 
@@ -77,6 +99,9 @@ type MutableState = {
   retainedSnapshotCompatibility: BookmarkStateView['retainedSnapshotCompatibility'];
   searchQuery: string;
   searchResults: BookmarkSearchResult[];
+  writeStatus: BookmarkStateView['writeStatus'];
+  writeMessage: string | null;
+  unconfirmedOperations: UnconfirmedBookmarkOperation[];
 };
 
 const createDefaultLifecycleAdapter = (): BookmarkLifecycleAdapter => ({
@@ -134,6 +159,7 @@ const viewFor = (state: MutableState): BookmarkStateView => {
           .filter((bookmark) => bookmark.folderId === selectedFolder.id)
           .sort(byRank)
       : [],
+    sequences: state.snapshot?.sequences ?? [],
     tagsByBookmark,
     expandedFolderIds: state.expandedFolderIds,
     notice: state.notice,
@@ -144,6 +170,9 @@ const viewFor = (state: MutableState): BookmarkStateView => {
       state.status === 'loading' && !state.snapshot && state.syncStatus === 'syncing',
     searchQuery: state.searchQuery,
     searchResults: state.searchResults,
+    writeStatus: state.writeStatus,
+    writeMessage: state.writeMessage,
+    unconfirmedOperations: state.unconfirmedOperations,
   };
 };
 
@@ -165,6 +194,9 @@ export const createBookmarkState = (adapters: {
     retainedSnapshotCompatibility: 'none',
     searchQuery: '',
     searchResults: [],
+    writeStatus: 'idle',
+    writeMessage: null,
+    unconfirmedOperations: [],
   };
   const listeners = new Set<(state: BookmarkStateView) => void>();
   let routeFolderId: string | undefined;
@@ -173,6 +205,8 @@ export const createBookmarkState = (adapters: {
   let intervalHandle: unknown;
   const lifecycleUnsubscribers: Array<() => void> = [];
   let searchRequest = 0;
+  let writeBusy = false;
+  let writeQueue: Promise<unknown> = Promise.resolve();
 
   const emit = () => {
     const view = viewFor(state);
@@ -290,6 +324,191 @@ export const createBookmarkState = (adapters: {
     return refreshPromise;
   };
 
+  const applyOptimisticCommand = (command: BookmarkCommand) => {
+    if (!state.snapshot) return;
+    const timestamp = new Date(lifecycle.now()).toISOString();
+    if (command.type === 'createFolder') {
+      state.snapshot.folders.push({
+        id: command.operationId,
+        name: command.name,
+        parentId: command.parentId,
+        rank: 'zzzz',
+        createdAt: timestamp,
+        modifiedAt: timestamp,
+        version: 1,
+      });
+      return;
+    }
+    if (command.type === 'editFolder') {
+      state.snapshot.folders = state.snapshot.folders.map((folder) =>
+        folder.id === command.folderId
+          ? { ...folder, name: command.name, modifiedAt: timestamp }
+          : folder,
+      );
+      return;
+    }
+    if (command.type === 'createBookmark') {
+      state.snapshot.bookmarks.push({
+        id: command.operationId,
+        folderId: command.folderId,
+        url: command.url,
+        title: command.title ?? new URL(command.url).hostname,
+        note: command.note,
+        rank: 'zzzz',
+        createdAt: timestamp,
+        modifiedAt: timestamp,
+        version: 1,
+      });
+      state.snapshot.tags.push(
+        ...normalizeBookmarkTags(command.tags).map((value) => ({
+          bookmarkId: command.operationId,
+          value,
+        })),
+      );
+      return;
+    }
+    state.snapshot.bookmarks = state.snapshot.bookmarks.map((bookmark) =>
+      bookmark.id === command.bookmarkId
+        ? {
+            ...bookmark,
+            url: command.url,
+            title: command.title,
+            note: command.note,
+            modifiedAt: timestamp,
+          }
+        : bookmark,
+    );
+    state.snapshot.tags = [
+      ...state.snapshot.tags.filter((tag) => tag.bookmarkId !== command.bookmarkId),
+      ...normalizeBookmarkTags(command.tags).map((value) => ({
+        bookmarkId: command.bookmarkId,
+        value,
+      })),
+    ];
+  };
+
+  const mergeCommandResult = (
+    snapshot: BookmarkSnapshot,
+    result: BookmarkCommandResult,
+  ): BookmarkSnapshot => {
+    const folderIds = new Set(result.folders.map((folder) => folder.id));
+    const bookmarkIds = new Set(result.bookmarks.map((bookmark) => bookmark.id));
+    const sequenceFolderIds = new Set(result.sequences.map((sequence) => sequence.folderId));
+    return {
+      ...snapshot,
+      revision: result.revision,
+      folders: [
+        ...snapshot.folders.filter((folder) => !folderIds.has(folder.id)),
+        ...result.folders,
+      ],
+      bookmarks: [
+        ...snapshot.bookmarks.filter((bookmark) => !bookmarkIds.has(bookmark.id)),
+        ...result.bookmarks,
+      ],
+      tags: [...snapshot.tags.filter((tag) => !bookmarkIds.has(tag.bookmarkId)), ...result.tags],
+      sequences: [
+        ...snapshot.sequences.filter((sequence) => !sequenceFolderIds.has(sequence.folderId)),
+        ...result.sequences,
+      ],
+    };
+  };
+
+  const performCommand = async (
+    command: BookmarkCommand,
+  ): Promise<BookmarkCommandResult | null> => {
+    if (!state.snapshot || !adapters.remote.executeCommand) {
+      state.writeStatus = 'failed';
+      state.writeMessage = 'Editing is not available.';
+      emit();
+      return null;
+    }
+    const priorSnapshot = structuredClone(state.snapshot);
+    state.snapshot = structuredClone(state.snapshot);
+    applyOptimisticCommand(command);
+    state.writeStatus = 'pending';
+    state.writeMessage = 'Saving changes…';
+    emit();
+    const pendingTimer = lifecycle.setTimeout(() => {
+      state.writeStatus = 'pending';
+      state.writeMessage = 'Still saving changes…';
+      emit();
+    }, 1_000);
+
+    try {
+      const result = await adapters.remote.executeCommand(command);
+      lifecycle.clearTimeout(pendingTimer);
+      state.snapshot = priorSnapshot;
+      if (result.status === 'conflict') {
+        state.snapshot = mergeCommandResult(state.snapshot, result);
+        state.writeStatus = 'conflict';
+        state.writeMessage = 'The item changed elsewhere. Review the current authoritative data.';
+        emit();
+        return result;
+      }
+      if (result.revision !== priorSnapshot.revision + 1) {
+        state.writeStatus = 'pending';
+        state.writeMessage = 'Refreshing authoritative Bookmarks…';
+        emit();
+        await refresh();
+      } else {
+        state.snapshot = mergeCommandResult(priorSnapshot, result);
+        const synchronizedAt = new Date(lifecycle.now()).toISOString();
+        await adapters.storage.writeSnapshot(state.snapshot, { synchronizedAt });
+        state.lastSuccessfulSyncAt = synchronizedAt;
+      }
+      await adapters.storage.removeUnconfirmedOperation?.(command.operationId);
+      state.unconfirmedOperations = state.unconfirmedOperations.filter(
+        (item) => item.command.operationId !== command.operationId,
+      );
+      state.writeStatus = 'idle';
+      state.writeMessage = null;
+      emit();
+      return result;
+    } catch (error) {
+      lifecycle.clearTimeout(pendingTimer);
+      state.snapshot = priorSnapshot;
+      if (error instanceof Error && error.name === 'UnknownBookmarkCommandError') {
+        const recordedAt = new Date(lifecycle.now()).toISOString();
+        const unconfirmed = { command, recordedAt };
+        await adapters.storage.writeUnconfirmedOperation?.(command, recordedAt);
+        state.unconfirmedOperations = [
+          ...state.unconfirmedOperations.filter(
+            (item) => item.command.operationId !== command.operationId,
+          ),
+          unconfirmed,
+        ];
+        state.writeStatus = 'unknown';
+        state.writeMessage = 'The save result is unknown. Authoritative Bookmarks were refreshed.';
+        emit();
+        await refresh();
+      } else {
+        state.writeStatus = 'failed';
+        state.writeMessage = 'The change was not saved.';
+        emit();
+      }
+      return null;
+    }
+  };
+
+  const enqueueCommand = (command: BookmarkCommand): Promise<BookmarkCommandResult | null> => {
+    if (!writeBusy) {
+      writeBusy = true;
+      const immediate = performCommand(command);
+      writeQueue = immediate.finally(() => {
+        writeBusy = false;
+      });
+      return immediate;
+    }
+    const queued = writeQueue.then(() => {
+      writeBusy = true;
+      return performCommand(command);
+    });
+    writeQueue = queued.finally(() => {
+      writeBusy = false;
+    });
+    return queued;
+  };
+
   const bindLifecycle = () => {
     if (intervalHandle !== undefined) return;
     lifecycleUnsubscribers.push(
@@ -322,9 +541,10 @@ export const createBookmarkState = (adapters: {
     },
     async initialize(options) {
       routeFolderId = options?.folderId;
-      const [storedSnapshot, navigation] = await Promise.all([
+      const [storedSnapshot, navigation, unconfirmedOperations] = await Promise.all([
         adapters.storage.readSnapshot(),
         adapters.storage.readNavigation(),
+        adapters.storage.readUnconfirmedOperations?.() ?? Promise.resolve([]),
       ]);
       state.snapshot = storedSnapshot.status === 'compatible' ? storedSnapshot.snapshot : null;
       state.lastSuccessfulSyncAt =
@@ -332,6 +552,7 @@ export const createBookmarkState = (adapters: {
       state.retainedSnapshotCompatibility =
         storedSnapshot.status === 'empty' ? 'none' : storedSnapshot.status;
       state.expandedFolderIds = navigation?.expandedFolderIds ?? [];
+      state.unconfirmedOperations = unconfirmedOperations;
       const preferredFolderId =
         routeFolderId ?? navigation?.selectedFolderId ?? SYSTEM_ROOT_FOLDER_ID;
       if (state.snapshot) {
@@ -382,6 +603,14 @@ export const createBookmarkState = (adapters: {
         : [...state.expandedFolderIds, folderId];
       await writeNavigation();
       emit();
+    },
+    executeCommand: enqueueCommand,
+    async retryUnconfirmed(operationId) {
+      const operation = state.unconfirmedOperations.find(
+        (item) => item.command.operationId === operationId,
+      );
+      if (!operation) return null;
+      return enqueueCommand(operation.command);
     },
     dispose() {
       if (intervalHandle !== undefined) lifecycle.clearInterval(intervalHandle);

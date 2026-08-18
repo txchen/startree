@@ -14,4 +14,6 @@ const readBookmarkRevision = async (bindings: Env): Promise<number> => {
 export default createApp<Env>({
   readBookmarkRevision,
   readBookmarkSnapshot: (bindings) => createBookmarkService(bindings.DB).getSnapshot(),
+  executeBookmarkCommand: (command, bindings) =>
+    createBookmarkService(bindings.DB).executeCommand(command),
 });

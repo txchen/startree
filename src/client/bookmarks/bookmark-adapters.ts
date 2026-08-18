@@ -2,8 +2,11 @@ import * as v from 'valibot';
 
 import {
   BOOKMARK_SNAPSHOT_WIRE_FORMAT_VERSION,
+  bookmarkCommandResultSchema,
+  bookmarkCommandSchema,
   bookmarkSnapshotEtag,
   bookmarkSnapshotSchema,
+  type BookmarkCommand,
   type BookmarkSnapshot,
 } from '../../shared/bookmarks/contracts';
 import { indexedDbRequest } from '../app/indexed-db';
@@ -30,9 +33,18 @@ const transactionComplete = (transaction: IDBTransaction): Promise<void> =>
     );
   });
 
+export class UnknownBookmarkCommandError extends Error {
+  override readonly name = 'UnknownBookmarkCommandError';
+}
+
 export const createFetchBookmarkAdapter = (
   fetcher: typeof fetch = fetch,
-): BookmarkRemoteAdapter => ({
+): BookmarkRemoteAdapter & {
+  executeCommand(
+    command: BookmarkCommand,
+    signal?: AbortSignal,
+  ): Promise<import('../../shared/bookmarks/contracts').BookmarkCommandResult>;
+} => ({
   async readSnapshot(revision, signal) {
     const headers =
       revision === null ? undefined : { 'If-None-Match': bookmarkSnapshotEtag(revision) };
@@ -43,6 +55,25 @@ export const createFetchBookmarkAdapter = (
     if (response.status === 304) return null;
     if (!response.ok) throw new Error(`Bookmark snapshot request failed with ${response.status}.`);
     return v.parse(bookmarkSnapshotSchema, await response.json());
+  },
+  async executeCommand(command, signal) {
+    let response: Response;
+    try {
+      response = await fetcher('/api/bookmarks/commands', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(v.parse(bookmarkCommandSchema, command)),
+        signal,
+      });
+    } catch (error) {
+      throw new UnknownBookmarkCommandError('The Bookmark command result is unknown.', {
+        cause: error,
+      });
+    }
+    if (!response.ok && response.status !== 409) {
+      throw new Error(`Bookmark command request failed with ${response.status}.`);
+    }
+    return v.parse(bookmarkCommandResultSchema, await response.json());
   },
 });
 
@@ -60,7 +91,13 @@ type CompleteSnapshotRecord = {
   synchronizedAt?: string;
 };
 
-const BOOKMARK_DATABASE_VERSION = 2;
+type UnconfirmedOperationRecord = {
+  operationId: string;
+  command: unknown;
+  recordedAt: string;
+};
+
+const BOOKMARK_DATABASE_VERSION = 3;
 const snapshotKey = (snapshot: BookmarkSnapshot): string =>
   `${snapshot.wireFormatVersion}:${snapshot.revision}`;
 
@@ -68,7 +105,13 @@ export const createIndexedDbBookmarkAdapter = (
   indexedDb: IDBFactory = indexedDB,
   databaseName = BOOKMARK_DATABASE_NAME,
   hooks: { beforeSnapshotCommit?(transaction: IDBTransaction): void } = {},
-): BookmarkStorageAdapter => {
+): BookmarkStorageAdapter &
+  Required<
+    Pick<
+      BookmarkStorageAdapter,
+      'readUnconfirmedOperations' | 'writeUnconfirmedOperation' | 'removeUnconfirmedOperation'
+    >
+  > => {
   const databasePromise = new Promise<IDBDatabase>((resolve, reject) => {
     const request = indexedDb.open(databaseName, BOOKMARK_DATABASE_VERSION);
     request.addEventListener(
@@ -79,6 +122,9 @@ export const createIndexedDbBookmarkAdapter = (
         }
         if (!request.result.objectStoreNames.contains('completeSnapshots')) {
           request.result.createObjectStore('completeSnapshots', { keyPath: 'key' });
+        }
+        if (!request.result.objectStoreNames.contains('unconfirmedOperations')) {
+          request.result.createObjectStore('unconfirmedOperations', { keyPath: 'operationId' });
         }
 
         if (
@@ -197,6 +243,40 @@ export const createIndexedDbBookmarkAdapter = (
       const database = await databasePromise;
       database.close();
       await indexedDbRequest(indexedDb.deleteDatabase(databaseName));
+    },
+    async readUnconfirmedOperations() {
+      const database = await databasePromise;
+      const transaction = database.transaction('unconfirmedOperations', 'readonly');
+      const records = await indexedDbRequest<UnconfirmedOperationRecord[]>(
+        transaction.objectStore('unconfirmedOperations').getAll(),
+      );
+      await transactionComplete(transaction);
+      return records
+        .map((record) => {
+          const command = v.safeParse(bookmarkCommandSchema, record.command);
+          return command.success
+            ? { command: command.output, recordedAt: record.recordedAt }
+            : null;
+        })
+        .filter((record): record is NonNullable<typeof record> => record !== null)
+        .sort((left, right) => left.recordedAt.localeCompare(right.recordedAt));
+    },
+    async writeUnconfirmedOperation(command, recordedAt) {
+      const validated = v.parse(bookmarkCommandSchema, command);
+      const database = await databasePromise;
+      const transaction = database.transaction('unconfirmedOperations', 'readwrite');
+      transaction.objectStore('unconfirmedOperations').put({
+        operationId: validated.operationId,
+        command: validated,
+        recordedAt,
+      } satisfies UnconfirmedOperationRecord);
+      await transactionComplete(transaction);
+    },
+    async removeUnconfirmedOperation(operationId) {
+      const database = await databasePromise;
+      const transaction = database.transaction('unconfirmedOperations', 'readwrite');
+      transaction.objectStore('unconfirmedOperations').delete(operationId);
+      await transactionComplete(transaction);
     },
   };
 };
