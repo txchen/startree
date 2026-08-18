@@ -2,6 +2,7 @@ import * as v from 'valibot';
 
 export const SYSTEM_ROOT_FOLDER_ID = '00000000-0000-4000-8000-000000000000';
 export const BOOKMARK_SNAPSHOT_WIRE_FORMAT_VERSION = 1;
+export const BOOKMARK_TRASH_WIRE_FORMAT_VERSION = 1;
 
 const uuidV4Schema = v.pipe(
   v.string(),
@@ -111,6 +112,26 @@ export type BookmarkTag = v.InferOutput<typeof bookmarkTagSchema>;
 export type BookmarkSequence = v.InferOutput<typeof bookmarkSequenceSchema>;
 export type BookmarkSnapshot = v.InferOutput<typeof bookmarkSnapshotSchema>;
 
+export const bookmarkTrashRootSchema = v.object({
+  kind: v.picklist(['folder', 'bookmark']),
+  id: identifierSchema,
+  deletedAt: timestampSchema,
+  originalParentId: identifierSchema,
+  originalRank: rankSchema,
+});
+
+export const bookmarkTrashSchema = v.object({
+  wireFormatVersion: v.literal(BOOKMARK_TRASH_WIRE_FORMAT_VERSION),
+  revision: v.pipe(v.number(), v.integer(), v.minValue(0)),
+  roots: v.array(bookmarkTrashRootSchema),
+  folders: v.array(bookmarkFolderSchema),
+  bookmarks: v.array(bookmarkSchema),
+  tags: v.array(bookmarkTagSchema),
+});
+
+export type BookmarkTrashRoot = v.InferOutput<typeof bookmarkTrashRootSchema>;
+export type BookmarkTrash = v.InferOutput<typeof bookmarkTrashSchema>;
+
 const commandBase = {
   operationId: uuidV4Schema,
 };
@@ -197,6 +218,47 @@ export const moveBookmarkCommandSchema = v.object({
   beforeBookmarkId: v.optional(identifierSchema),
 });
 
+export const trashBookmarkCommandSchema = v.object({
+  ...commandBase,
+  type: v.literal('trashBookmark'),
+  bookmarkId: identifierSchema,
+  bookmarkVersion: entityVersionSchema,
+  folderId: identifierSchema,
+  expectedBookmarkSequenceVersion: entityVersionSchema,
+});
+
+export const trashFolderCommandSchema = v.object({
+  ...commandBase,
+  type: v.literal('trashFolder'),
+  folderId: identifierSchema,
+  folderVersion: entityVersionSchema,
+  parentId: identifierSchema,
+  expectedFolderSequenceVersion: entityVersionSchema,
+});
+
+export const restoreTrashCommandSchema = v.object({
+  ...commandBase,
+  type: v.literal('restoreTrash'),
+  rootKind: v.picklist(['folder', 'bookmark']),
+  rootId: identifierSchema,
+  rootVersion: entityVersionSchema,
+  expectedDestinationSequenceVersion: entityVersionSchema,
+});
+
+export const purgeTrashCommandSchema = v.object({
+  ...commandBase,
+  type: v.literal('purgeTrash'),
+  rootKind: v.picklist(['folder', 'bookmark']),
+  rootId: identifierSchema,
+  rootVersion: entityVersionSchema,
+});
+
+export const emptyTrashCommandSchema = v.object({
+  ...commandBase,
+  type: v.literal('emptyTrash'),
+  expectedRevision: v.pipe(v.number(), v.integer(), v.minValue(0)),
+});
+
 export const bookmarkCommandSchema = v.variant('type', [
   createFolderCommandSchema,
   editFolderCommandSchema,
@@ -206,6 +268,11 @@ export const bookmarkCommandSchema = v.variant('type', [
   moveFolderCommandSchema,
   reorderBookmarkCommandSchema,
   moveBookmarkCommandSchema,
+  trashBookmarkCommandSchema,
+  trashFolderCommandSchema,
+  restoreTrashCommandSchema,
+  purgeTrashCommandSchema,
+  emptyTrashCommandSchema,
 ]);
 
 const commandRecords = {
@@ -214,6 +281,8 @@ const commandRecords = {
   bookmarks: v.array(bookmarkSchema),
   tags: v.array(bookmarkTagSchema),
   sequences: v.array(bookmarkSequenceSchema),
+  deletedFolderIds: v.optional(v.array(identifierSchema)),
+  deletedBookmarkIds: v.optional(v.array(identifierSchema)),
 };
 
 export const bookmarkCommandResultSchema = v.variant('status', [
@@ -266,8 +335,21 @@ export const visitBookmarkCommand = <Result>(
       return handlers.reorderBookmark(command);
     case 'moveBookmark':
       return handlers.moveBookmark(command);
+    case 'trashBookmark':
+      return handlers.trashBookmark(command);
+    case 'trashFolder':
+      return handlers.trashFolder(command);
+    case 'restoreTrash':
+      return handlers.restoreTrash(command);
+    case 'purgeTrash':
+      return handlers.purgeTrash(command);
+    case 'emptyTrash':
+      return handlers.emptyTrash(command);
   }
 };
 
 export const bookmarkSnapshotEtag = (revision: number): string =>
   `"bookmarks-${BOOKMARK_SNAPSHOT_WIRE_FORMAT_VERSION}-${revision}"`;
+
+export const bookmarkTrashEtag = (revision: number): string =>
+  `"bookmark-trash-${BOOKMARK_TRASH_WIRE_FORMAT_VERSION}-${revision}"`;

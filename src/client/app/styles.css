@@ -153,6 +153,40 @@ h2 {
   background: #ebe7dd;
 }
 
+.trash-navigation {
+  width: 100%;
+  margin-top: 24px;
+  padding: 10px 12px;
+  border: 1px solid #c9bfb0;
+  border-radius: 8px;
+  color: #76513b;
+  background: #f2ece2;
+  cursor: pointer;
+  text-align: left;
+}
+
+.undo-notice {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 18px;
+  padding: 11px 14px;
+  border: 1px solid #9aa79c;
+  border-radius: 8px;
+  background: #e5ece4;
+}
+
+.undo-notice button,
+.trash-actions button,
+.trash-list button {
+  padding: 7px 10px;
+  border: 1px solid currentcolor;
+  border-radius: 7px;
+  color: inherit;
+  background: transparent;
+  cursor: pointer;
+}
+
 .sidebar-heading {
   padding: 0 10px 24px;
 }
@@ -567,6 +601,18 @@ h2 {
   font-size: 0.7rem;
 }
 
+.folder-grid .tile-delete {
+  position: absolute;
+  right: 52px;
+  bottom: 5px;
+  display: block;
+  padding: 4px 7px;
+  border: 0;
+  color: #7a4837;
+  background: #f1e6df;
+  font-size: 0.7rem;
+}
+
 .folder-icon {
   display: grid;
   width: 34px;
@@ -611,6 +657,55 @@ h2 {
   background: #f1eee7;
   cursor: pointer;
   font-size: 0.7rem;
+}
+
+.bookmark-delete-button {
+  position: absolute;
+  right: 55px;
+  bottom: 7px;
+  padding: 4px 7px;
+  border: 0;
+  border-radius: 6px;
+  color: #7a4837;
+  background: #f1e6df;
+  cursor: pointer;
+  font-size: 0.7rem;
+}
+
+.trash-actions,
+.trash-list li,
+.trash-list li > div:last-child {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+
+.trash-list {
+  display: grid;
+  gap: 10px;
+  margin: 28px 0;
+  padding: 0;
+  list-style: none;
+}
+
+.trash-list li {
+  justify-content: space-between;
+  padding: 18px;
+  border: 1px solid #d8d1c4;
+  border-radius: 10px;
+  background: #faf8f3;
+}
+
+.trash-list strong,
+.trash-list small {
+  display: block;
+}
+
+.trash-list small,
+.deletion-promise {
+  margin-top: 5px;
+  color: #746e64;
+  font-size: 0.78rem;
 }
 
 .drop-at-end {

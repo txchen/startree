@@ -4,6 +4,7 @@ import {
   SYSTEM_ROOT_FOLDER_ID,
   type BookmarkCommandResult,
   type BookmarkSnapshot,
+  type BookmarkTrash,
 } from '../../shared/bookmarks/contracts';
 import { createApp } from './create-app';
 
@@ -31,10 +32,20 @@ const snapshot: BookmarkSnapshot = {
   sequences: [{ folderId: SYSTEM_ROOT_FOLDER_ID, folderVersion: 1, bookmarkVersion: 1 }],
 };
 
+const trash: BookmarkTrash = {
+  wireFormatVersion: 1,
+  revision: 7,
+  roots: [],
+  folders: [],
+  bookmarks: [],
+  tags: [],
+};
+
 const createTestApp = () =>
   createApp<typeof bindings>({
     readBookmarkRevision: () => Promise.resolve(7),
     readBookmarkSnapshot: () => Promise.resolve(snapshot),
+    readBookmarkTrash: () => Promise.resolve(trash),
     executeBookmarkCommand: (command) =>
       Promise.resolve({
         status: 'acknowledged',
@@ -100,6 +111,21 @@ describe('platform API', () => {
     await expect(response.text()).resolves.toBe('');
   });
 
+  it('returns validated online-only Trash with revision invalidation', async () => {
+    const response = await createTestApp().request('/api/bookmarks/trash', undefined, bindings);
+    expect(response.status).toBe(200);
+    expect(response.headers.get('etag')).toBe('"bookmark-trash-1-7"');
+    expect(response.headers.get('cache-control')).toBe('private, no-store');
+    await expect(response.json()).resolves.toEqual(trash);
+
+    const unchanged = await createTestApp().request(
+      '/api/bookmarks/trash',
+      { headers: { 'If-None-Match': '"bookmark-trash-1-7"' } },
+      bindings,
+    );
+    expect(unchanged.status).toBe(304);
+  });
+
   it('validates and executes a shared Bookmark command', async () => {
     const response = await createTestApp().request(
       'http://startree.local/api/bookmarks/commands',
@@ -129,6 +155,7 @@ describe('platform API', () => {
     const app = createApp<typeof bindings>({
       readBookmarkRevision: () => Promise.resolve(7),
       readBookmarkSnapshot: () => Promise.resolve(snapshot),
+      readBookmarkTrash: () => Promise.resolve(trash),
       executeBookmarkCommand: (command) =>
         Promise.resolve({
           status: 'conflict',

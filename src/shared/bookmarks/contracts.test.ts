@@ -7,6 +7,7 @@ import {
   bookmarkSchema,
   normalizeBookmarkTags,
   SYSTEM_ROOT_FOLDER_ID,
+  bookmarkTrashSchema,
 } from './contracts';
 
 const bookmark = {
@@ -192,6 +193,60 @@ describe('Bookmark command contract', () => {
     expect(
       normalizeBookmarkTags(Array.from({ length: 50 }, (_, index) => `tag-${index}`)),
     ).toHaveLength(50);
+  });
+
+  it.each([
+    {
+      type: 'trashBookmark',
+      bookmarkId: bookmark.id,
+      bookmarkVersion: 1,
+      folderId: bookmark.folderId,
+      expectedBookmarkSequenceVersion: 2,
+    },
+    {
+      type: 'trashFolder',
+      folderId: '10000000-0000-4000-8000-000000000001',
+      folderVersion: 1,
+      parentId: SYSTEM_ROOT_FOLDER_ID,
+      expectedFolderSequenceVersion: 2,
+    },
+    {
+      type: 'restoreTrash',
+      rootKind: 'folder',
+      rootId: '10000000-0000-4000-8000-000000000001',
+      rootVersion: 2,
+      expectedDestinationSequenceVersion: 3,
+    },
+    {
+      type: 'purgeTrash',
+      rootKind: 'bookmark',
+      rootId: bookmark.id,
+      rootVersion: 2,
+    },
+    { type: 'emptyTrash', expectedRevision: 4 },
+  ])('accepts the $type Trash command contract', (command) => {
+    expect(v.safeParse(bookmarkCommandSchema, { ...command, operationId }).success).toBe(true);
+  });
+
+  it('validates flat Trash roots and their complete records', () => {
+    expect(
+      v.safeParse(bookmarkTrashSchema, {
+        wireFormatVersion: 1,
+        revision: 7,
+        roots: [
+          {
+            kind: 'bookmark',
+            id: bookmark.id,
+            deletedAt: '2026-08-18T12:00:00.000Z',
+            originalParentId: bookmark.folderId,
+            originalRank: 'a',
+          },
+        ],
+        folders: [],
+        bookmarks: [bookmark],
+        tags: [],
+      }).success,
+    ).toBe(true);
   });
 
   it('validates Tag length and count below, at, and above their limits', () => {

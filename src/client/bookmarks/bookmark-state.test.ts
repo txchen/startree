@@ -93,6 +93,60 @@ const snapshot = (revision = 1): BookmarkSnapshot => ({
 });
 
 describe('Bookmark state Module Interface', () => {
+  it('removes a trashed Bookmark optimistically and loads Trash only while online', async () => {
+    const remote = createMemoryBookmarkRemoteAdapter(snapshot());
+    const bookmark = snapshot().bookmarks[1]!;
+    remote.setTrash({
+      wireFormatVersion: 1,
+      revision: 2,
+      roots: [
+        {
+          kind: 'bookmark',
+          id: bookmark.id,
+          deletedAt: '2026-08-18T01:00:00.000Z',
+          originalParentId: folderId,
+          originalRank: 'a',
+        },
+      ],
+      folders: [],
+      bookmarks: [{ ...bookmark, version: 2 }],
+      tags: [{ bookmarkId: bookmark.id, value: 'Reference' }],
+    });
+    remote.executeCommand = async (command) => ({
+      status: 'acknowledged',
+      operationId: command.operationId,
+      revision: 2,
+      folders: [],
+      bookmarks: [],
+      tags: [],
+      sequences: [{ folderId, folderVersion: 1, bookmarkVersion: 2 }],
+      deletedBookmarkIds: [bookmark.id],
+    });
+    const lifecycle = createMemoryBookmarkLifecycleAdapter();
+    const state = createBookmarkState({
+      remote,
+      storage: createMemoryBookmarkStorageAdapter(),
+      lifecycle,
+    });
+    await state.initialize({ folderId });
+
+    await state.executeCommand({
+      type: 'trashBookmark',
+      operationId: 'ad000000-0000-4000-8000-000000000001',
+      bookmarkId: bookmark.id,
+      bookmarkVersion: 1,
+      folderId,
+      expectedBookmarkSequenceVersion: 1,
+    });
+
+    expect(state.getState().directBookmarks.map((item) => item.id)).not.toContain(bookmark.id);
+    expect(state.getState().trash?.roots).toEqual([expect.objectContaining({ id: bookmark.id })]);
+    lifecycle.setOnline(false);
+    await state.loadTrash();
+    expect(state.getState()).toMatchObject({ trash: null, trashStatus: 'offline' });
+    state.dispose();
+  });
+
   it('initializes from adapters and exposes only direct children in independent order', async () => {
     const remote = createMemoryBookmarkRemoteAdapter(snapshot());
     const storage = createMemoryBookmarkStorageAdapter();

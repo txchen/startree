@@ -5,6 +5,7 @@ import type {
   BookmarkFolder,
   BookmarkSequence,
   BookmarkSnapshot,
+  BookmarkTrash,
 } from '../../shared/bookmarks/contracts';
 import {
   bookmarkTitleFor,
@@ -21,6 +22,7 @@ export type BookmarkNavigation = {
 
 export type BookmarkRemoteAdapter = {
   readSnapshot(revision: number | null, signal?: AbortSignal): Promise<BookmarkSnapshot | null>;
+  readTrash?(revision: number | null, signal?: AbortSignal): Promise<BookmarkTrash | null>;
   executeCommand?(command: BookmarkCommand, signal?: AbortSignal): Promise<BookmarkCommandResult>;
 };
 
@@ -84,6 +86,8 @@ export type BookmarkStateView = Readonly<{
   writeStatus: 'idle' | 'pending' | 'failed' | 'conflict' | 'unknown';
   writeMessage: string | null;
   unconfirmedOperations: readonly UnconfirmedBookmarkOperation[];
+  trash: BookmarkTrash | null;
+  trashStatus: 'idle' | 'loading' | 'failed' | 'offline';
 }>;
 
 export type BookmarkState = {
@@ -92,6 +96,7 @@ export type BookmarkState = {
   initialize(options?: { folderId?: string }): Promise<void>;
   refresh(): Promise<void>;
   refreshAfterMutation(): Promise<void>;
+  loadTrash(): Promise<void>;
   search(query: string): Promise<void>;
   selectFolder(folderId: string): Promise<boolean>;
   toggleFolderExpanded(folderId: string): Promise<void>;
@@ -114,6 +119,8 @@ type MutableState = {
   writeStatus: BookmarkStateView['writeStatus'];
   writeMessage: string | null;
   unconfirmedOperations: UnconfirmedBookmarkOperation[];
+  trash: BookmarkTrash | null;
+  trashStatus: BookmarkStateView['trashStatus'];
 };
 
 const createDefaultLifecycleAdapter = (): BookmarkLifecycleAdapter => ({
@@ -206,6 +213,8 @@ const viewFor = (state: MutableState): BookmarkStateView => {
     writeStatus: state.writeStatus,
     writeMessage: state.writeMessage,
     unconfirmedOperations: state.unconfirmedOperations,
+    trash: state.trash,
+    trashStatus: state.trashStatus,
   };
 };
 
@@ -231,6 +240,8 @@ export const createBookmarkState = (adapters: {
     writeStatus: 'idle',
     writeMessage: null,
     unconfirmedOperations: [],
+    trash: null,
+    trashStatus: 'idle',
   };
   const listeners = new Set<(state: BookmarkStateView) => void>();
   let routeFolderId: string | undefined;
@@ -358,6 +369,30 @@ export const createBookmarkState = (adapters: {
     return refreshPromise;
   };
 
+  const loadTrash = async () => {
+    if (!lifecycle.isOnline() || state.syncStatus === 'offline') {
+      state.trash = null;
+      state.trashStatus = 'offline';
+      emit();
+      return;
+    }
+    if (!adapters.remote.readTrash) {
+      state.trashStatus = 'failed';
+      emit();
+      return;
+    }
+    state.trashStatus = 'loading';
+    emit();
+    try {
+      const replacement = await adapters.remote.readTrash(state.trash?.revision ?? null);
+      if (replacement) state.trash = replacement;
+      state.trashStatus = 'idle';
+    } catch {
+      state.trashStatus = 'failed';
+    }
+    emit();
+  };
+
   const applyOptimisticCommand = (command: BookmarkCommand) => {
     if (!state.snapshot) return;
     const timestamp = new Date(lifecycle.now()).toISOString();
@@ -462,6 +497,44 @@ export const createBookmarkState = (adapters: {
           moveCommand.beforeBookmarkId,
         );
       },
+      trashBookmark(trashCommand) {
+        if (!state.snapshot) return;
+        state.snapshot.bookmarks = state.snapshot.bookmarks.filter(
+          (bookmark) => bookmark.id !== trashCommand.bookmarkId,
+        );
+        state.snapshot.tags = state.snapshot.tags.filter(
+          (tag) => tag.bookmarkId !== trashCommand.bookmarkId,
+        );
+      },
+      trashFolder(trashCommand) {
+        if (!state.snapshot) return;
+        const folderIds = new Set([trashCommand.folderId]);
+        let changed = true;
+        while (changed) {
+          changed = false;
+          for (const folder of state.snapshot.folders) {
+            if (folder.parentId && folderIds.has(folder.parentId) && !folderIds.has(folder.id)) {
+              folderIds.add(folder.id);
+              changed = true;
+            }
+          }
+        }
+        const bookmarkIds = new Set(
+          state.snapshot.bookmarks
+            .filter((bookmark) => folderIds.has(bookmark.folderId))
+            .map((bookmark) => bookmark.id),
+        );
+        state.snapshot.folders = state.snapshot.folders.filter(
+          (folder) => !folderIds.has(folder.id),
+        );
+        state.snapshot.bookmarks = state.snapshot.bookmarks.filter(
+          (bookmark) => !bookmarkIds.has(bookmark.id),
+        );
+        state.snapshot.tags = state.snapshot.tags.filter((tag) => !bookmarkIds.has(tag.bookmarkId));
+      },
+      restoreTrash() {},
+      purgeTrash() {},
+      emptyTrash() {},
     });
   };
 
@@ -472,18 +545,29 @@ export const createBookmarkState = (adapters: {
     const folderIds = new Set(result.folders.map((folder) => folder.id));
     const bookmarkIds = new Set(result.bookmarks.map((bookmark) => bookmark.id));
     const sequenceFolderIds = new Set(result.sequences.map((sequence) => sequence.folderId));
+    const deletedFolderIds = new Set(result.deletedFolderIds ?? []);
+    const deletedBookmarkIds = new Set(result.deletedBookmarkIds ?? []);
     return {
       ...snapshot,
       revision: result.revision,
       folders: [
-        ...snapshot.folders.filter((folder) => !folderIds.has(folder.id)),
+        ...snapshot.folders.filter(
+          (folder) => !folderIds.has(folder.id) && !deletedFolderIds.has(folder.id),
+        ),
         ...result.folders,
       ],
       bookmarks: [
-        ...snapshot.bookmarks.filter((bookmark) => !bookmarkIds.has(bookmark.id)),
+        ...snapshot.bookmarks.filter(
+          (bookmark) => !bookmarkIds.has(bookmark.id) && !deletedBookmarkIds.has(bookmark.id),
+        ),
         ...result.bookmarks,
       ],
-      tags: [...snapshot.tags.filter((tag) => !bookmarkIds.has(tag.bookmarkId)), ...result.tags],
+      tags: [
+        ...snapshot.tags.filter(
+          (tag) => !bookmarkIds.has(tag.bookmarkId) && !deletedBookmarkIds.has(tag.bookmarkId),
+        ),
+        ...result.tags,
+      ],
       sequences: [
         ...snapshot.sequences.filter((sequence) => !sequenceFolderIds.has(sequence.folderId)),
         ...result.sequences,
@@ -566,6 +650,13 @@ export const createBookmarkState = (adapters: {
       state.writeStatus = 'idle';
       state.writeMessage = null;
       adapters.revisionChannel?.announce(result.revision);
+      if (
+        ['trashBookmark', 'trashFolder', 'restoreTrash', 'purgeTrash', 'emptyTrash'].includes(
+          command.type,
+        )
+      ) {
+        await loadTrash();
+      }
       emit();
       return result;
     } catch (error) {
@@ -632,6 +723,8 @@ export const createBookmarkState = (adapters: {
       lifecycle.subscribe('online', () => void refresh()),
       lifecycle.subscribe('offline', () => {
         state.syncStatus = 'offline';
+        state.trash = null;
+        state.trashStatus = 'offline';
         emit();
       }),
       lifecycle.subscribe('visibilitychange', () => {
@@ -697,6 +790,7 @@ export const createBookmarkState = (adapters: {
     },
     refresh,
     refreshAfterMutation: refresh,
+    loadTrash,
     async search(query) {
       const currentRequest = ++searchRequest;
       state.searchQuery = query;

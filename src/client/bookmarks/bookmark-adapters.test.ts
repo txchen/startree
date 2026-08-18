@@ -56,6 +56,26 @@ describe('production Bookmark adapters', () => {
     await expect(adapter.readSnapshot(null)).rejects.toThrow();
   });
 
+  it('Fetch Adapter conditionally loads validated online-only Trash', async () => {
+    const trash = {
+      wireFormatVersion: 1 as const,
+      revision: 4,
+      roots: [],
+      folders: [],
+      bookmarks: [],
+      tags: [],
+    };
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(Response.json(trash));
+    const adapter = createFetchBookmarkAdapter(fetcher);
+    await expect(adapter.readTrash(3)).resolves.toEqual(trash);
+    expect(fetcher).toHaveBeenCalledWith('/api/bookmarks/trash', {
+      headers: { 'If-None-Match': '"bookmark-trash-1-3"' },
+      signal: undefined,
+    });
+    fetcher.mockResolvedValueOnce(new Response(null, { status: 304 }));
+    await expect(adapter.readTrash(4)).resolves.toBeNull();
+  });
+
   it('Fetch Adapter sends commands and validates authoritative results', async () => {
     const command: BookmarkCommand = {
       type: 'createFolder',

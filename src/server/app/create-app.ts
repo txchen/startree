@@ -6,9 +6,12 @@ import {
   bookmarkCommandSchema,
   bookmarkSnapshotEtag,
   bookmarkSnapshotSchema,
+  bookmarkTrashEtag,
+  bookmarkTrashSchema,
   type BookmarkCommand,
   type BookmarkCommandResult,
   type BookmarkSnapshot,
+  type BookmarkTrash,
 } from '../../shared/bookmarks/contracts';
 import { platformStatusSchema } from '../../shared/platform/contracts';
 import { errorResponse, requestIdFor } from './errors';
@@ -18,6 +21,7 @@ import type { AppEnvironment, CoreBindings } from './types';
 type AppServices<Bindings> = {
   readBookmarkRevision(bindings: Bindings): Promise<number>;
   readBookmarkSnapshot(bindings: Bindings): Promise<BookmarkSnapshot>;
+  readBookmarkTrash(bindings: Bindings): Promise<BookmarkTrash>;
   executeBookmarkCommand(
     command: BookmarkCommand,
     bindings: Bindings,
@@ -78,6 +82,14 @@ export const createApp = <Bindings extends CoreBindings>(services: AppServices<B
     }
 
     return context.json(snapshot);
+  });
+
+  app.get('/api/bookmarks/trash', async (context) => {
+    const trash = v.parse(bookmarkTrashSchema, await services.readBookmarkTrash(context.env));
+    const etag = bookmarkTrashEtag(trash.revision);
+    context.header('ETag', etag);
+    if (context.req.header('If-None-Match') === etag) return context.body(null, 304);
+    return context.json(trash);
   });
 
   app.post('/api/bookmarks/commands', async (context) => {

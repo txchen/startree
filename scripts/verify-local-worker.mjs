@@ -300,14 +300,14 @@ try {
     );
     await page.unrouteAll({ behavior: 'wait' });
 
-    await page.getByRole('button', { name: 'Move UI Folder Renamed' }).click();
+    await page.getByRole('button', { name: 'Move UI Folder Renamed', exact: true }).click();
     await page
       .getByLabel('Destination Folder')
       .selectOption('10000000-0000-4000-8000-000000000003');
     await page.locator('.move-dialog').getByRole('button', { name: 'Move' }).click();
     await uiFolderTile.waitFor({ state: 'detached' });
 
-    await page.getByRole('button', { name: 'Move Authoritative Bookmark' }).click();
+    await page.getByRole('button', { name: 'Move Authoritative Bookmark', exact: true }).click();
     await page
       .getByLabel('Destination Folder')
       .selectOption('10000000-0000-4000-8000-000000000003');
@@ -323,7 +323,55 @@ try {
     await page.goForward();
     await page.getByRole('heading', { level: 1, name: 'Articles' }).waitFor();
     await page.goBack();
-    await page.getByRole('button', { name: 'Done' }).click();
+    await page.getByRole('heading', { level: 1, name: 'Reading' }).waitFor();
+
+    let folderConfirmation = '';
+    page.once('dialog', async (dialog) => {
+      folderConfirmation = dialog.message();
+      await dialog.accept();
+    });
+    await page.getByRole('button', { name: 'Move Articles to Trash' }).click();
+    await page.getByText('Moved to Trash.').waitFor();
+    if (
+      !folderConfirmation.includes('1 child Folders') ||
+      !folderConfirmation.includes('1 Bookmarks')
+    ) {
+      throw new Error(`Folder Trash confirmation omitted subtree counts: ${folderConfirmation}`);
+    }
+    await page.getByRole('button', { name: 'Undo' }).click();
+    await page.locator('.folder-grid').getByText('Articles', { exact: true }).waitFor();
+
+    await page.locator('.folder-tile button').filter({ hasText: 'Articles' }).click();
+    await page.getByRole('heading', { level: 1, name: 'Articles' }).waitFor();
+    await page.getByRole('button', { name: 'Move Authoritative Bookmark to Trash' }).click();
+    await page.getByText('Moved to Trash.').waitFor();
+    await page.getByRole('button', { name: 'Trash', exact: true }).click();
+    await page.getByRole('heading', { level: 1, name: 'Trash' }).waitFor();
+    await page.getByText('Authoritative Bookmark', { exact: true }).waitFor();
+    await page.getByRole('button', { name: 'Restore' }).click();
+    await page.getByText('Trash is empty').waitFor();
+    await page.getByRole('button', { name: 'Back to Bookmarks' }).click();
+    await page.getByRole('link', { name: /Authoritative Bookmark/ }).waitFor();
+    await page.getByRole('button', { name: 'Edit', exact: true }).click();
+
+    await page.getByRole('button', { name: 'Move Authoritative Bookmark to Trash' }).click();
+    await page.getByRole('button', { name: 'Trash', exact: true }).click();
+    page.once('dialog', (dialog) => dialog.accept());
+    await page.getByRole('button', { name: 'Delete permanently' }).click();
+    await page.getByText('Trash is empty').waitFor();
+    await page.getByRole('button', { name: 'Back to Bookmarks' }).click();
+    await page.getByRole('button', { name: 'Edit', exact: true }).click();
+
+    await page.getByRole('button', { name: 'Move UI Folder Renamed to Trash' }).click();
+    await page.getByRole('button', { name: 'Trash', exact: true }).click();
+    page.once('dialog', (dialog) => dialog.accept());
+    await page.getByRole('button', { name: 'Empty Trash' }).click();
+    await page.getByText('Trash is empty').waitFor();
+    await page.getByRole('button', { name: 'Back to Bookmarks' }).click();
+    await page.goBack();
+    if (await page.getByRole('button', { name: 'Done' }).count()) {
+      await page.getByRole('button', { name: 'Done' }).click();
+    }
     if (await page.getByRole('button', { name: 'New Folder' }).count()) {
       throw new Error('Done did not return the desktop Bookmarks Page to Browse Mode.');
     }
@@ -431,6 +479,13 @@ try {
       throw new Error(`Offline state was not exposed: ${offlineText}`);
     }
     await page.getByText(/Last synchronized:/).waitFor();
+    await page.getByRole('button', { name: 'Trash', exact: true }).click();
+    await page.getByRole('heading', { level: 1, name: 'Trash' }).waitFor();
+    const offlineTrashText = await page.locator('.trash-view').textContent();
+    if (!offlineTrashText?.includes('Trash is online only')) {
+      throw new Error(`Trash did not expose its online-only state: ${offlineTrashText}`);
+    }
+    await page.getByRole('button', { name: 'Back to Bookmarks' }).click();
     await searchInput.fill('useful reference');
     await page.locator('.search-results a').filter({ hasText: 'Example Reference' }).waitFor();
     await page.getByText('A useful reference for complete-Worker verification.').waitFor();
@@ -500,7 +555,7 @@ try {
   }
 
   console.log(
-    'Local Worker passed D1-backed API, organization, search, keyboard, offline, and refresh-degradation verification.',
+    'Local Worker passed D1-backed API, organization, Trash, search, keyboard, offline, and refresh-degradation verification.',
   );
 } finally {
   worker.kill('SIGTERM');

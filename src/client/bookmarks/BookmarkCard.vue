@@ -8,7 +8,7 @@ const props = defineProps<{
   tags: readonly string[];
   editable: boolean;
 }>();
-const emit = defineEmits<{ edit: []; move: []; dragstart: []; drop: [] }>();
+const emit = defineEmits<{ edit: []; move: []; remove: []; dragstart: []; drop: [] }>();
 
 const faviconFailed = ref(false);
 const destination = computed(() => new URL(props.bookmark.url));
@@ -69,6 +69,15 @@ const activate = (event: MouseEvent) => {
       @click="emit('move')"
     >
       Move
+    </button>
+    <button
+      v-if="editable"
+      class="bookmark-delete-button desktop-edit-controls"
+      type="button"
+      :aria-label="`Move ${bookmark.title} to Trash`"
+      @click="emit('remove')"
+    >
+      Trash
     </button>
   </article>
 </template>

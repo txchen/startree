@@ -3,7 +3,12 @@ import { computed, nextTick, onMounted, onUnmounted, ref, shallowRef, watch } fr
 import { useRoute, useRouter } from 'vue-router';
 
 import { SYSTEM_ROOT_FOLDER_ID } from '../../shared/bookmarks/contracts';
-import type { Bookmark, BookmarkCommand, BookmarkFolder } from '../../shared/bookmarks/contracts';
+import type {
+  Bookmark,
+  BookmarkCommand,
+  BookmarkFolder,
+  BookmarkTrashRoot,
+} from '../../shared/bookmarks/contracts';
 import BookmarkCard from './BookmarkCard.vue';
 import BookmarkEditorModal from './BookmarkEditorModal.vue';
 import type { BookmarkEditorValue } from './bookmark-editor';
@@ -35,6 +40,8 @@ const dragged = ref<{ kind: 'folder' | 'bookmark'; id: string } | null>(null);
 const moveEditor = ref<{ kind: 'folder' | 'bookmark'; id: string } | null>(null);
 const moveDestinationId = ref(SYSTEM_ROOT_FOLDER_ID);
 const moveBeforeId = ref('');
+const trashOpen = ref(false);
+const lastDeletedRoot = ref<BookmarkTrashRoot | null>(null);
 const stateModule = createBookmarkState({
   remote: createFetchBookmarkAdapter(),
   storage: createIndexedDbBookmarkAdapter(),
@@ -367,6 +374,138 @@ const saveEditor = async (value: BookmarkEditorValue) => {
   }
 };
 
+const openTrash = async () => {
+  trashOpen.value = true;
+  editMode.value = false;
+  await stateModule.loadTrash();
+};
+
+const closeTrash = () => {
+  trashOpen.value = false;
+};
+
+const trashBookmark = async (bookmark: Bookmark) => {
+  const sequence = sequenceFor(bookmark.folderId);
+  if (!sequence) return;
+  const result = await stateModule.executeCommand({
+    type: 'trashBookmark',
+    operationId: crypto.randomUUID(),
+    bookmarkId: bookmark.id,
+    bookmarkVersion: bookmark.version,
+    folderId: bookmark.folderId,
+    expectedBookmarkSequenceVersion: sequence.bookmarkVersion,
+  });
+  if (result?.status === 'acknowledged') {
+    lastDeletedRoot.value =
+      state.value.trash?.roots.find((root) => root.id === bookmark.id) ?? null;
+  }
+};
+
+const folderContents = (folderId: string) => {
+  const ids = new Set([folderId]);
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const folder of state.value.folders) {
+      if (folder.parentId && ids.has(folder.parentId) && !ids.has(folder.id)) {
+        ids.add(folder.id);
+        changed = true;
+      }
+    }
+  }
+  return {
+    folders: ids.size - 1,
+    bookmarks: state.value.bookmarks.filter((bookmark) => ids.has(bookmark.folderId)).length,
+  };
+};
+
+const trashFolder = async (folder: BookmarkFolder) => {
+  if (!folder.parentId) return;
+  const sequence = sequenceFor(folder.parentId);
+  if (!sequence) return;
+  const contents = folderContents(folder.id);
+  if (
+    (contents.folders || contents.bookmarks) &&
+    !window.confirm(
+      `Move “${folder.name}” and its ${contents.folders} child Folders and ${contents.bookmarks} Bookmarks to Trash?`,
+    )
+  )
+    return;
+  const result = await stateModule.executeCommand({
+    type: 'trashFolder',
+    operationId: crypto.randomUUID(),
+    folderId: folder.id,
+    folderVersion: folder.version,
+    parentId: folder.parentId,
+    expectedFolderSequenceVersion: sequence.folderVersion,
+  });
+  if (result?.status === 'acknowledged') {
+    lastDeletedRoot.value = state.value.trash?.roots.find((root) => root.id === folder.id) ?? null;
+  }
+};
+
+const trashRecordVersion = (root: BookmarkTrashRoot) =>
+  root.kind === 'folder'
+    ? state.value.trash?.folders.find((folder) => folder.id === root.id)?.version
+    : state.value.trash?.bookmarks.find((bookmark) => bookmark.id === root.id)?.version;
+
+const restoreTrashRoot = async (root: BookmarkTrashRoot) => {
+  const activeParent = state.value.folders.some((folder) => folder.id === root.originalParentId)
+    ? root.originalParentId
+    : SYSTEM_ROOT_FOLDER_ID;
+  const sequence = sequenceFor(activeParent);
+  const version = trashRecordVersion(root);
+  if (!sequence || !version) return;
+  const result = await stateModule.executeCommand({
+    type: 'restoreTrash',
+    operationId: crypto.randomUUID(),
+    rootKind: root.kind,
+    rootId: root.id,
+    rootVersion: version,
+    expectedDestinationSequenceVersion:
+      root.kind === 'folder' ? sequence.folderVersion : sequence.bookmarkVersion,
+  });
+  if (result?.status === 'acknowledged' && lastDeletedRoot.value?.id === root.id) {
+    lastDeletedRoot.value = null;
+  }
+};
+
+const purgeTrashRoot = async (root: BookmarkTrashRoot) => {
+  const version = trashRecordVersion(root);
+  if (
+    !version ||
+    !window.confirm(
+      'Permanently delete this item from authoritative storage? Disconnected snapshots and Owner-managed exports are not erased.',
+    )
+  )
+    return;
+  const result = await stateModule.executeCommand({
+    type: 'purgeTrash',
+    operationId: crypto.randomUUID(),
+    rootKind: root.kind,
+    rootId: root.id,
+    rootVersion: version,
+  });
+  if (result?.status === 'acknowledged' && lastDeletedRoot.value?.id === root.id)
+    lastDeletedRoot.value = null;
+};
+
+const emptyTrash = async () => {
+  if (
+    !state.value.trash ||
+    !window.confirm(
+      'Permanently delete every Trash item from authoritative storage? This cannot be undone.',
+    )
+  )
+    return;
+  const result = await stateModule.executeCommand({
+    type: 'emptyTrash',
+    operationId: crypto.randomUUID(),
+    expectedRevision: state.value.trash.revision,
+  });
+  if (result?.status === 'acknowledged') lastDeletedRoot.value = null;
+};
+
 onMounted(async () => {
   desktopMedia = window.matchMedia('(min-width: 761px)');
   desktopMedia.addEventListener('change', updateDesktopEditing);
@@ -427,10 +566,15 @@ onUnmounted(() => {
         @select="navigateToFolder"
         @toggle="toggleFolder"
       />
+      <button class="trash-navigation" type="button" @click="openTrash">Trash</button>
     </aside>
 
     <div class="bookmarks-workspace">
       <p v-if="state.notice" class="navigation-notice" role="status">{{ state.notice }}</p>
+      <div v-if="lastDeletedRoot" class="undo-notice" role="status">
+        <span>Moved to Trash.</span>
+        <button type="button" @click="restoreTrashRoot(lastDeletedRoot)">Undo</button>
+      </div>
 
       <div
         v-if="state.writeStatus !== 'idle'"
@@ -475,7 +619,7 @@ onUnmounted(() => {
         </button>
       </div>
 
-      <div class="bookmark-search">
+      <div v-if="!trashOpen" class="bookmark-search">
         <label for="bookmark-search-input">Search every Folder and Bookmark</label>
         <div class="search-field">
           <span aria-hidden="true">⌕</span>
@@ -533,8 +677,69 @@ onUnmounted(() => {
         </div>
       </div>
 
+      <section v-if="trashOpen" class="trash-view" aria-labelledby="bookmarks-title">
+        <header class="library-heading">
+          <div>
+            <span class="eyebrow">Online only</span>
+            <h1 id="bookmarks-title">Trash</h1>
+          </div>
+          <div class="trash-actions">
+            <button type="button" @click="closeTrash">Back to Bookmarks</button>
+            <button
+              v-if="editingAvailable && state.trash?.roots.length"
+              type="button"
+              @click="emptyTrash"
+            >
+              Empty Trash
+            </button>
+          </div>
+        </header>
+        <div v-if="state.trashStatus === 'offline'" class="library-state empty">
+          <span class="state-mark" aria-hidden="true">⌁</span>
+          <h2>Trash is online only</h2>
+          <p>
+            Reconnect to review or change authoritative Trash. Offline snapshots do not include it.
+          </p>
+        </div>
+        <div v-else-if="state.trashStatus === 'loading'" class="library-state empty">
+          <p>Loading Trash…</p>
+        </div>
+        <div v-else-if="state.trashStatus === 'failed'" class="library-state empty">
+          <h2>Trash could not be loaded</h2>
+          <button type="button" @click="stateModule.loadTrash()">Try again</button>
+        </div>
+        <div v-else-if="!state.trash?.roots.length" class="library-state empty">
+          <span class="state-mark" aria-hidden="true">✓</span>
+          <h2>Trash is empty</h2>
+          <p>Deleted Bookmarks and Folder trees will appear here for 30 days.</p>
+        </div>
+        <ul v-else class="trash-list">
+          <li v-for="root in state.trash.roots" :key="`${root.kind}:${root.id}`">
+            <div>
+              <strong>{{
+                root.kind === 'folder'
+                  ? state.trash.folders.find((item) => item.id === root.id)?.name
+                  : state.trash.bookmarks.find((item) => item.id === root.id)?.title
+              }}</strong>
+              <small
+                >{{ root.kind === 'folder' ? 'Folder tree' : 'Bookmark' }} · Deleted
+                {{ formatSyncTime(root.deletedAt) }}</small
+              >
+            </div>
+            <div v-if="editingAvailable">
+              <button type="button" @click="restoreTrashRoot(root)">Restore</button
+              ><button type="button" @click="purgeTrashRoot(root)">Delete permanently</button>
+            </div>
+          </li>
+        </ul>
+        <p v-if="state.trash?.roots.length" class="deletion-promise">
+          Permanent deletion removes authoritative D1 records and future responses. It cannot erase
+          disconnected browser snapshots or Owner-managed exports.
+        </p>
+      </section>
+
       <div
-        v-if="state.status === 'loading' && !state.coldLoadProgressVisible"
+        v-else-if="state.status === 'loading' && !state.coldLoadProgressVisible"
         class="cold-shell"
         aria-hidden="true"
       ></div>
@@ -611,6 +816,13 @@ onUnmounted(() => {
               >
                 Edit Folder
               </button>
+              <button
+                v-if="state.selectedFolder && state.selectedFolder.id !== SYSTEM_ROOT_FOLDER_ID"
+                type="button"
+                @click="trashFolder(state.selectedFolder)"
+              >
+                Trash Folder
+              </button>
               <button type="button" @click="editMode = false">Done</button>
             </div>
           </div>
@@ -663,6 +875,15 @@ onUnmounted(() => {
               >
                 Move
               </button>
+              <button
+                v-if="editingAvailable && editMode"
+                class="tile-delete desktop-edit-controls"
+                type="button"
+                :aria-label="`Move ${folder.name} to Trash`"
+                @click="trashFolder(folder)"
+              >
+                Trash
+              </button>
             </div>
             <div
               v-if="editingAvailable && editMode"
@@ -693,6 +914,7 @@ onUnmounted(() => {
               :editable="editingAvailable && editMode"
               @edit="openBookmarkEditor(bookmark)"
               @move="openMoveEditor('bookmark', bookmark.id)"
+              @remove="trashBookmark(bookmark)"
               @dragstart="dragged = { kind: 'bookmark', id: bookmark.id }"
               @drop="dropBookmark(bookmark.id)"
             />
@@ -748,6 +970,16 @@ onUnmounted(() => {
           @select="navigateToFolder"
           @toggle="toggleFolder"
         />
+        <button
+          class="trash-navigation"
+          type="button"
+          @click="
+            drawerOpen = false;
+            openTrash();
+          "
+        >
+          Trash
+        </button>
       </aside>
     </div>
 

@@ -2,10 +2,12 @@ import * as v from 'valibot';
 
 import {
   BOOKMARK_SNAPSHOT_WIRE_FORMAT_VERSION,
+  BOOKMARK_TRASH_WIRE_FORMAT_VERSION,
   bookmarkTitleFor,
   bookmarkCommandResultSchema,
   bookmarkCommandSchema,
   bookmarkSnapshotSchema,
+  bookmarkTrashSchema,
   normalizeBookmarkTags,
   visitBookmarkCommand,
   type Bookmark,
@@ -14,10 +16,13 @@ import {
   type BookmarkFolder,
   type BookmarkSequence,
   type BookmarkSnapshot,
+  type BookmarkTrash,
 } from '../../shared/bookmarks/contracts';
 
 export type BookmarkService = {
   getSnapshot(): Promise<BookmarkSnapshot>;
+  getTrash(): Promise<BookmarkTrash>;
+  expireTrash(): Promise<number>;
   executeCommand(command: BookmarkCommand): Promise<BookmarkCommandResult>;
 };
 
@@ -116,6 +121,50 @@ const readSnapshot = async (database: D1Database): Promise<BookmarkSnapshot> => 
   });
 };
 
+const readTrash = async (database: D1Database): Promise<BookmarkTrash> => {
+  const results = await database.batch<SnapshotRow>([
+    database.prepare("SELECT revision FROM bookmark_domain_state WHERE name = 'bookmarks'"),
+    database.prepare(
+      `SELECT 'folder' AS kind, id, trashed_at AS deletedAt,
+              original_parent_id AS originalParentId, original_rank AS originalRank
+         FROM bookmark_folders WHERE trashed_at IS NOT NULL
+        UNION ALL
+       SELECT 'bookmark' AS kind, id, trashed_at AS deletedAt,
+              original_folder_id AS originalParentId, original_rank AS originalRank
+         FROM bookmarks WHERE trashed_at IS NOT NULL
+        ORDER BY deletedAt DESC, id`,
+    ),
+    database.prepare(
+      `SELECT id, name, parent_id AS parentId, rank, created_at AS createdAt,
+              modified_at AS modifiedAt, version
+         FROM bookmark_folders
+        WHERE trashed_at IS NOT NULL OR trash_root_id IS NOT NULL
+        ORDER BY COALESCE(trash_root_id, id), parent_id, rank, id`,
+    ),
+    database.prepare(
+      `SELECT id, folder_id AS folderId, url, title, note, rank,
+              created_at AS createdAt, modified_at AS modifiedAt, version
+         FROM bookmarks
+        WHERE trashed_at IS NOT NULL OR trash_root_id IS NOT NULL
+        ORDER BY COALESCE(trash_root_id, id), folder_id, rank, id`,
+    ),
+    database.prepare(
+      `SELECT bookmark_tags.bookmark_id AS bookmarkId, bookmark_tags.display_value AS value
+         FROM bookmark_tags JOIN bookmarks ON bookmarks.id = bookmark_tags.bookmark_id
+        WHERE bookmarks.trashed_at IS NOT NULL OR bookmarks.trash_root_id IS NOT NULL
+        ORDER BY bookmark_tags.bookmark_id, bookmark_tags.lowercase_key`,
+    ),
+  ]);
+  return v.parse(bookmarkTrashSchema, {
+    wireFormatVersion: BOOKMARK_TRASH_WIRE_FORMAT_VERSION,
+    revision: rowsAt(results, 0)[0]?.revision,
+    roots: rowsAt(results, 1),
+    folders: rowsAt(results, 2),
+    bookmarks: rowsAt(results, 3),
+    tags: rowsAt(results, 4),
+  });
+};
+
 const folderStatement = (database: D1Database, folderId: string) =>
   database
     .prepare(
@@ -156,7 +205,10 @@ const nextRank = async (
   parentId: string,
 ): Promise<Rank> => {
   const row = await database
-    .prepare(`SELECT MAX(rank) AS rank FROM ${table} WHERE ${parentColumn} = ?`)
+    .prepare(
+      `SELECT MAX(rank) AS rank FROM ${table}
+        WHERE ${parentColumn} = ? AND trashed_at IS NULL AND trash_root_id IS NULL`,
+    )
     .bind(parentId)
     .first<{ rank: string | null }>();
   return toRank(row?.rank ? `${row.rank}z` : 'a');
@@ -506,6 +558,21 @@ export const createBookmarkService = (
           sequenceFolderId: moveCommand.sourceFolderId,
         });
       },
+      async trashBookmark(command) {
+        return conflict(command, 'missing_entity');
+      },
+      async trashFolder(command) {
+        return conflict(command, 'missing_entity');
+      },
+      async restoreTrash(command) {
+        return conflict(command, 'missing_entity');
+      },
+      async purgeTrash(command) {
+        return conflict(command, 'missing_entity');
+      },
+      async emptyTrash(command) {
+        return conflict(command, 'stale_entity');
+      },
     });
 
   const isAssertionFailure = (error: unknown): boolean => {
@@ -816,6 +883,484 @@ export const createBookmarkService = (
         positions,
         result,
       });
+      return result;
+    };
+
+    const trashBookmark = async (
+      trashCommand: Extract<BookmarkCommand, { type: 'trashBookmark' }>,
+    ): Promise<BookmarkCommandResult> => {
+      const [bookmark, sequence] = await Promise.all([
+        bookmarkStatement(database, trashCommand.bookmarkId).first<BookmarkRow>(),
+        sequenceStatement(database, trashCommand.folderId).first<SequenceRow>(),
+      ]);
+      if (!bookmark || !sequence || bookmark.folderId !== trashCommand.folderId) {
+        return conflict(trashCommand, 'missing_entity');
+      }
+      if (bookmark.version !== trashCommand.bookmarkVersion) {
+        return conflict(trashCommand, 'stale_entity', { bookmarkId: bookmark.id });
+      }
+      if (sequence.bookmarkVersion !== trashCommand.expectedBookmarkSequenceVersion) {
+        return conflict(trashCommand, 'stale_sequence', {
+          sequenceFolderId: trashCommand.folderId,
+        });
+      }
+      const result = v.parse(bookmarkCommandResultSchema, {
+        status: 'acknowledged',
+        operationId: trashCommand.operationId,
+        revision: revision + 1,
+        folders: [],
+        bookmarks: [],
+        tags: [],
+        sequences: [{ ...sequence, bookmarkVersion: sequence.bookmarkVersion + 1 }],
+        deletedBookmarkIds: [bookmark.id],
+      });
+      await beforeCommandBatch();
+      await database.batch([
+        database
+          .prepare(
+            `INSERT INTO bookmark_command_assertions (operation_id, valid)
+             SELECT ?, CASE WHEN
+               (SELECT revision FROM bookmark_domain_state WHERE name = 'bookmarks') = ?
+               AND (SELECT version FROM bookmarks
+                     WHERE id = ? AND folder_id = ? AND trashed_at IS NULL AND trash_root_id IS NULL) = ?
+               AND (SELECT version FROM bookmark_sequences
+                     WHERE folder_id = ? AND kind = 'bookmarks') = ?
+             THEN 1 ELSE 0 END`,
+          )
+          .bind(
+            trashCommand.operationId,
+            revision,
+            bookmark.id,
+            trashCommand.folderId,
+            trashCommand.bookmarkVersion,
+            trashCommand.folderId,
+            trashCommand.expectedBookmarkSequenceVersion,
+          ),
+        database
+          .prepare(
+            `UPDATE bookmarks
+                SET trashed_at = ?, trash_root_id = NULL, original_folder_id = folder_id,
+                    original_rank = rank, modified_at = ?, version = version + 1
+              WHERE id = ?`,
+          )
+          .bind(timestamp, timestamp, bookmark.id),
+        database
+          .prepare(
+            "UPDATE bookmark_sequences SET version = version + 1 WHERE folder_id = ? AND kind = 'bookmarks'",
+          )
+          .bind(trashCommand.folderId),
+        database.prepare(
+          "UPDATE bookmark_domain_state SET revision = revision + 1 WHERE name = 'bookmarks'",
+        ),
+        ...storeResultStatements(trashCommand, result, timestamp, expiresAt),
+      ]);
+      return result;
+    };
+
+    const trashFolder = async (
+      trashCommand: Extract<BookmarkCommand, { type: 'trashFolder' }>,
+    ): Promise<BookmarkCommandResult> => {
+      const [folder, sequence] = await Promise.all([
+        folderStatement(database, trashCommand.folderId).first<FolderRow>(),
+        sequenceStatement(database, trashCommand.parentId).first<SequenceRow>(),
+      ]);
+      if (!folder || !sequence || folder.parentId !== trashCommand.parentId) {
+        return conflict(trashCommand, 'missing_entity');
+      }
+      if (folder.version !== trashCommand.folderVersion) {
+        return conflict(trashCommand, 'stale_entity', { folderId: folder.id });
+      }
+      if (sequence.folderVersion !== trashCommand.expectedFolderSequenceVersion) {
+        return conflict(trashCommand, 'stale_sequence', {
+          sequenceFolderId: trashCommand.parentId,
+        });
+      }
+      const subtree = await database
+        .prepare(
+          `WITH RECURSIVE subtree(id) AS (
+             SELECT id FROM bookmark_folders WHERE id = ?
+             UNION ALL
+             SELECT child.id FROM bookmark_folders child JOIN subtree parent ON child.parent_id = parent.id
+              WHERE child.trashed_at IS NULL AND child.trash_root_id IS NULL
+           ) SELECT id FROM subtree ORDER BY id`,
+        )
+        .bind(folder.id)
+        .all<{ id: string }>();
+      const folderIds = subtree.results.map((row) => row.id);
+      const nestedBookmarks = await database
+        .prepare(
+          `WITH RECURSIVE subtree(id) AS (
+             SELECT id FROM bookmark_folders WHERE id = ?
+             UNION ALL
+             SELECT child.id FROM bookmark_folders child JOIN subtree parent ON child.parent_id = parent.id
+              WHERE child.trashed_at IS NULL AND child.trash_root_id IS NULL
+           ) SELECT bookmarks.id FROM bookmarks JOIN subtree ON subtree.id = bookmarks.folder_id
+              WHERE bookmarks.trashed_at IS NULL AND bookmarks.trash_root_id IS NULL ORDER BY bookmarks.id`,
+        )
+        .bind(folder.id)
+        .all<{ id: string }>();
+      const bookmarkIds = nestedBookmarks.results.map((row) => row.id);
+      const result = v.parse(bookmarkCommandResultSchema, {
+        status: 'acknowledged',
+        operationId: trashCommand.operationId,
+        revision: revision + 1,
+        folders: [],
+        bookmarks: [],
+        tags: [],
+        sequences: [{ ...sequence, folderVersion: sequence.folderVersion + 1 }],
+        deletedFolderIds: folderIds,
+        deletedBookmarkIds: bookmarkIds,
+      });
+      await beforeCommandBatch();
+      await database.batch([
+        database
+          .prepare(
+            `INSERT INTO bookmark_command_assertions (operation_id, valid)
+             SELECT ?, CASE WHEN
+               (SELECT revision FROM bookmark_domain_state WHERE name = 'bookmarks') = ?
+               AND (SELECT version FROM bookmark_folders
+                     WHERE id = ? AND parent_id = ? AND trashed_at IS NULL AND trash_root_id IS NULL) = ?
+               AND (SELECT version FROM bookmark_sequences WHERE folder_id = ? AND kind = 'folders') = ?
+             THEN 1 ELSE 0 END`,
+          )
+          .bind(
+            trashCommand.operationId,
+            revision,
+            folder.id,
+            trashCommand.parentId,
+            trashCommand.folderVersion,
+            trashCommand.parentId,
+            trashCommand.expectedFolderSequenceVersion,
+          ),
+        database
+          .prepare(
+            `UPDATE bookmark_folders
+                SET trashed_at = ?, trash_root_id = NULL, original_parent_id = parent_id,
+                    original_rank = rank, modified_at = ?, version = version + 1
+              WHERE id = ?`,
+          )
+          .bind(timestamp, timestamp, folder.id),
+        database
+          .prepare(
+            `WITH RECURSIVE subtree(id) AS (
+               SELECT id FROM bookmark_folders WHERE id = ?
+               UNION ALL SELECT child.id FROM bookmark_folders child JOIN subtree parent ON child.parent_id = parent.id
+                 WHERE child.trashed_at IS NULL AND child.trash_root_id IS NULL
+             ) UPDATE bookmark_folders SET trash_root_id = ? WHERE id IN (SELECT id FROM subtree) AND id != ?`,
+          )
+          .bind(folder.id, folder.id, folder.id),
+        database
+          .prepare(
+            `WITH RECURSIVE subtree(id) AS (
+               SELECT id FROM bookmark_folders WHERE id = ?
+               UNION ALL SELECT child.id FROM bookmark_folders child JOIN subtree parent ON child.parent_id = parent.id
+                 WHERE (child.trashed_at IS NULL AND child.trash_root_id IS NULL)
+                    OR child.trash_root_id = ?
+             ) UPDATE bookmarks SET trash_root_id = ? WHERE folder_id IN (SELECT id FROM subtree)
+                 AND trashed_at IS NULL AND trash_root_id IS NULL`,
+          )
+          .bind(folder.id, folder.id, folder.id),
+        database
+          .prepare(
+            "UPDATE bookmark_sequences SET version = version + 1 WHERE folder_id = ? AND kind = 'folders'",
+          )
+          .bind(trashCommand.parentId),
+        database.prepare(
+          "UPDATE bookmark_domain_state SET revision = revision + 1 WHERE name = 'bookmarks'",
+        ),
+        ...storeResultStatements(trashCommand, result, timestamp, expiresAt),
+      ]);
+      return result;
+    };
+
+    const restoreTrash = async (
+      restoreCommand: Extract<BookmarkCommand, { type: 'restoreTrash' }>,
+    ): Promise<BookmarkCommandResult> => {
+      const table = restoreCommand.rootKind === 'folder' ? 'bookmark_folders' : 'bookmarks';
+      const root = await database
+        .prepare(
+          restoreCommand.rootKind === 'folder'
+            ? `SELECT id, name, version, original_parent_id AS originalParentId,
+                      original_rank AS originalRank FROM bookmark_folders
+                 WHERE id = ? AND trashed_at IS NOT NULL AND trash_root_id IS NULL`
+            : `SELECT id, version, original_folder_id AS originalParentId,
+                      original_rank AS originalRank FROM bookmarks
+                 WHERE id = ? AND trashed_at IS NOT NULL AND trash_root_id IS NULL`,
+        )
+        .bind(restoreCommand.rootId)
+        .first<{
+          id: string;
+          name?: string;
+          version: number;
+          originalParentId: string;
+          originalRank: string;
+        }>();
+      if (!root) return conflict(restoreCommand, 'missing_entity');
+      if (root.version !== restoreCommand.rootVersion) {
+        return conflict(restoreCommand, 'stale_entity');
+      }
+      const originalParent = await folderStatement(
+        database,
+        root.originalParentId,
+      ).first<FolderRow>();
+      const destinationId = originalParent
+        ? root.originalParentId
+        : '00000000-0000-4000-8000-000000000000';
+      const sequence = await sequenceStatement(database, destinationId).first<SequenceRow>();
+      if (!sequence) return conflict(restoreCommand, 'missing_entity');
+      const sequenceVersion =
+        restoreCommand.rootKind === 'folder' ? sequence.folderVersion : sequence.bookmarkVersion;
+      if (sequenceVersion !== restoreCommand.expectedDestinationSequenceVersion) {
+        return conflict(restoreCommand, 'stale_sequence', { sequenceFolderId: destinationId });
+      }
+      if (restoreCommand.rootKind === 'folder') {
+        const duplicate = await database
+          .prepare(
+            `SELECT id FROM bookmark_folders WHERE parent_id = ? AND name = ? AND id != ?
+              AND trashed_at IS NULL AND trash_root_id IS NULL`,
+          )
+          .bind(destinationId, root.name, root.id)
+          .first<{ id: string }>();
+        if (duplicate) return conflict(restoreCommand, 'name_conflict', { folderId: duplicate.id });
+      }
+      const parentColumn = restoreCommand.rootKind === 'folder' ? 'parent_id' : 'folder_id';
+      const kind: SequenceKind = restoreCommand.rootKind === 'folder' ? 'folders' : 'bookmarks';
+      const rankConflict = await database
+        .prepare(
+          `SELECT id FROM ${table} WHERE ${parentColumn} = ? AND rank = ? AND id != ?
+            AND trashed_at IS NULL AND trash_root_id IS NULL`,
+        )
+        .bind(destinationId, root.originalRank, root.id)
+        .first<{ id: string }>();
+      const rank = rankConflict
+        ? await nextRank(database, table, parentColumn, destinationId)
+        : toRank(root.originalRank);
+      const trash = await readTrash(database);
+      const restoredFolderIds = new Set<string>();
+      if (restoreCommand.rootKind === 'folder') {
+        const rows = await database
+          .prepare(
+            `WITH RECURSIVE subtree(id) AS (
+               SELECT id FROM bookmark_folders WHERE id = ?
+               UNION ALL SELECT child.id FROM bookmark_folders child JOIN subtree parent ON child.parent_id = parent.id
+             ) SELECT id FROM subtree`,
+          )
+          .bind(root.id)
+          .all<{ id: string }>();
+        restoredFolderIds.clear();
+        rows.results.forEach((row) => restoredFolderIds.add(row.id));
+      }
+      const restoredBookmarks = trash.bookmarks.filter((item) =>
+        restoreCommand.rootKind === 'bookmark'
+          ? item.id === root.id
+          : restoredFolderIds.has(item.folderId),
+      );
+      const restoredFolders = trash.folders
+        .filter((item) => restoredFolderIds.has(item.id))
+        .map((item) =>
+          item.id === root.id
+            ? {
+                ...item,
+                parentId: destinationId,
+                rank,
+                modifiedAt: timestamp,
+                version: item.version + 1,
+              }
+            : item,
+        );
+      const result = v.parse(bookmarkCommandResultSchema, {
+        status: 'acknowledged',
+        operationId: restoreCommand.operationId,
+        revision: revision + 1,
+        folders: restoredFolders,
+        bookmarks:
+          restoreCommand.rootKind === 'bookmark'
+            ? restoredBookmarks.map((item) => ({
+                ...item,
+                folderId: destinationId,
+                rank,
+                modifiedAt: timestamp,
+                version: item.version + 1,
+              }))
+            : restoredBookmarks,
+        tags: trash.tags.filter((tag) =>
+          restoredBookmarks.some((item) => item.id === tag.bookmarkId),
+        ),
+        sequences: [
+          {
+            ...sequence,
+            ...(kind === 'folders'
+              ? { folderVersion: sequence.folderVersion + 1 }
+              : { bookmarkVersion: sequence.bookmarkVersion + 1 }),
+          },
+        ],
+      });
+      await beforeCommandBatch();
+      await database.batch([
+        database
+          .prepare(
+            `INSERT INTO bookmark_command_assertions (operation_id, valid)
+             SELECT ?, CASE WHEN
+               (SELECT revision FROM bookmark_domain_state WHERE name = 'bookmarks') = ?
+               AND (SELECT version FROM ${table} WHERE id = ? AND trashed_at IS NOT NULL) = ?
+               AND (SELECT version FROM bookmark_sequences WHERE folder_id = ? AND kind = ?) = ?
+             THEN 1 ELSE 0 END`,
+          )
+          .bind(
+            restoreCommand.operationId,
+            revision,
+            root.id,
+            root.version,
+            destinationId,
+            kind,
+            restoreCommand.expectedDestinationSequenceVersion,
+          ),
+        database
+          .prepare(
+            `UPDATE ${table} SET ${parentColumn} = ?, rank = ?, trashed_at = NULL,
+                    trash_root_id = NULL, modified_at = ?, version = version + 1,
+                    ${restoreCommand.rootKind === 'folder' ? 'original_parent_id' : 'original_folder_id'} = NULL,
+                    original_rank = NULL WHERE id = ?`,
+          )
+          .bind(destinationId, rank, timestamp, root.id),
+        ...(restoreCommand.rootKind === 'folder'
+          ? [
+              database
+                .prepare('UPDATE bookmark_folders SET trash_root_id = NULL WHERE trash_root_id = ?')
+                .bind(root.id),
+              database
+                .prepare('UPDATE bookmarks SET trash_root_id = NULL WHERE trash_root_id = ?')
+                .bind(root.id),
+            ]
+          : []),
+        database
+          .prepare(
+            'UPDATE bookmark_sequences SET version = version + 1 WHERE folder_id = ? AND kind = ?',
+          )
+          .bind(destinationId, kind),
+        database.prepare(
+          "UPDATE bookmark_domain_state SET revision = revision + 1 WHERE name = 'bookmarks'",
+        ),
+        ...storeResultStatements(restoreCommand, result, timestamp, expiresAt),
+      ]);
+      return result;
+    };
+
+    const purgeTrash = async (
+      purgeCommand: Extract<BookmarkCommand, { type: 'purgeTrash' }>,
+    ): Promise<BookmarkCommandResult> => {
+      const table = purgeCommand.rootKind === 'folder' ? 'bookmark_folders' : 'bookmarks';
+      const root = await database
+        .prepare(`SELECT id, version FROM ${table} WHERE id = ? AND trashed_at IS NOT NULL`)
+        .bind(purgeCommand.rootId)
+        .first<{ id: string; version: number }>();
+      if (!root) return conflict(purgeCommand, 'missing_entity');
+      if (root.version !== purgeCommand.rootVersion) return conflict(purgeCommand, 'stale_entity');
+      let folderIds: string[] = [];
+      let bookmarkIds: string[] = [];
+      if (purgeCommand.rootKind === 'folder') {
+        const folders = await database
+          .prepare(
+            `WITH RECURSIVE subtree(id, depth) AS (
+               SELECT id, 0 FROM bookmark_folders WHERE id = ?
+               UNION ALL SELECT child.id, parent.depth + 1 FROM bookmark_folders child
+                 JOIN subtree parent ON child.parent_id = parent.id
+             ) SELECT id FROM subtree ORDER BY depth DESC`,
+          )
+          .bind(root.id)
+          .all<{ id: string }>();
+        folderIds = folders.results.map((row) => row.id);
+        if (folderIds.length) {
+          const placeholders = folderIds.map(() => '?').join(', ');
+          const bookmarks = await database
+            .prepare(`SELECT id FROM bookmarks WHERE folder_id IN (${placeholders}) ORDER BY id`)
+            .bind(...folderIds)
+            .all<{ id: string }>();
+          bookmarkIds = bookmarks.results.map((row) => row.id);
+        }
+      } else {
+        bookmarkIds = [root.id];
+      }
+      const result = v.parse(bookmarkCommandResultSchema, {
+        status: 'acknowledged',
+        operationId: purgeCommand.operationId,
+        revision: revision + 1,
+        folders: [],
+        bookmarks: [],
+        tags: [],
+        sequences: [],
+        deletedFolderIds: folderIds,
+        deletedBookmarkIds: bookmarkIds,
+      });
+      await beforeCommandBatch();
+      await database.batch([
+        database
+          .prepare(
+            `INSERT INTO bookmark_command_assertions (operation_id, valid)
+             SELECT ?, CASE WHEN
+               (SELECT revision FROM bookmark_domain_state WHERE name = 'bookmarks') = ?
+               AND (SELECT version FROM ${table} WHERE id = ? AND trashed_at IS NOT NULL) = ?
+             THEN 1 ELSE 0 END`,
+          )
+          .bind(purgeCommand.operationId, revision, root.id, root.version),
+        ...bookmarkIds.map((id) => database.prepare('DELETE FROM bookmarks WHERE id = ?').bind(id)),
+        ...folderIds.map((id) =>
+          database.prepare('DELETE FROM bookmark_folders WHERE id = ?').bind(id),
+        ),
+        database.prepare(
+          "UPDATE bookmark_domain_state SET revision = revision + 1 WHERE name = 'bookmarks'",
+        ),
+        ...storeResultStatements(purgeCommand, result, timestamp, expiresAt),
+      ]);
+      return result;
+    };
+
+    const emptyTrash = async (
+      emptyCommand: Extract<BookmarkCommand, { type: 'emptyTrash' }>,
+    ): Promise<BookmarkCommandResult> => {
+      if (emptyCommand.expectedRevision !== revision) return conflict(emptyCommand, 'stale_entity');
+      const trash = await readTrash(database);
+      const orderedFolders = await database
+        .prepare(
+          `WITH RECURSIVE trashed(id, depth) AS (
+             SELECT id, 0 FROM bookmark_folders WHERE trashed_at IS NOT NULL
+             UNION ALL SELECT child.id, parent.depth + 1 FROM bookmark_folders child
+               JOIN trashed parent ON child.parent_id = parent.id
+           ) SELECT id FROM trashed ORDER BY depth DESC, id`,
+        )
+        .all<{ id: string }>();
+      const folderIds = orderedFolders.results.map((folder) => folder.id);
+      const bookmarkIds = trash.bookmarks.map((bookmark) => bookmark.id);
+      const result = v.parse(bookmarkCommandResultSchema, {
+        status: 'acknowledged',
+        operationId: emptyCommand.operationId,
+        revision: revision + 1,
+        folders: [],
+        bookmarks: [],
+        tags: [],
+        sequences: [],
+        deletedFolderIds: folderIds,
+        deletedBookmarkIds: bookmarkIds,
+      });
+      await beforeCommandBatch();
+      await database.batch([
+        database
+          .prepare(
+            `INSERT INTO bookmark_command_assertions (operation_id, valid)
+             SELECT ?, CASE WHEN
+               (SELECT revision FROM bookmark_domain_state WHERE name = 'bookmarks') = ?
+             THEN 1 ELSE 0 END`,
+          )
+          .bind(emptyCommand.operationId, revision),
+        ...bookmarkIds.map((id) => database.prepare('DELETE FROM bookmarks WHERE id = ?').bind(id)),
+        ...folderIds.map((id) =>
+          database.prepare('DELETE FROM bookmark_folders WHERE id = ?').bind(id),
+        ),
+        database.prepare(
+          "UPDATE bookmark_domain_state SET revision = revision + 1 WHERE name = 'bookmarks'",
+        ),
+        ...storeResultStatements(emptyCommand, result, timestamp, expiresAt),
+      ]);
       return result;
     };
 
@@ -1140,6 +1685,11 @@ export const createBookmarkService = (
         moveFolder: organizeFolder,
         reorderBookmark: organizeBookmark,
         moveBookmark: organizeBookmark,
+        trashBookmark,
+        trashFolder,
+        restoreTrash,
+        purgeTrash,
+        emptyTrash,
       });
     } catch (error) {
       const settledAfterRace = await database
@@ -1158,8 +1708,62 @@ export const createBookmarkService = (
     }
   };
 
+  const expireTrash = async (): Promise<number> => {
+    const cutoff = new Date(now().getTime() - 30 * 24 * 60 * 60 * 1_000).toISOString();
+    const [folderRoots, bookmarkRoots] = await Promise.all([
+      database
+        .prepare('SELECT id FROM bookmark_folders WHERE trashed_at IS NOT NULL AND trashed_at <= ?')
+        .bind(cutoff)
+        .all<{ id: string }>(),
+      database
+        .prepare('SELECT id FROM bookmarks WHERE trashed_at IS NOT NULL AND trashed_at <= ?')
+        .bind(cutoff)
+        .all<{ id: string }>(),
+    ]);
+    const rootCount = folderRoots.results.length + bookmarkRoots.results.length;
+    if (!rootCount) return 0;
+    const folderIds: string[] = [];
+    const bookmarkIds = bookmarkRoots.results.map((row) => row.id);
+    for (const root of folderRoots.results) {
+      const folders = await database
+        .prepare(
+          `WITH RECURSIVE subtree(id, depth) AS (
+             SELECT id, 0 FROM bookmark_folders WHERE id = ?
+             UNION ALL SELECT child.id, parent.depth + 1 FROM bookmark_folders child
+               JOIN subtree parent ON child.parent_id = parent.id
+           ) SELECT id FROM subtree ORDER BY depth DESC`,
+        )
+        .bind(root.id)
+        .all<{ id: string }>();
+      const ids = folders.results.map((row) => row.id);
+      folderIds.push(...ids);
+      if (ids.length) {
+        const bookmarks = await database
+          .prepare(`SELECT id FROM bookmarks WHERE folder_id IN (${ids.map(() => '?').join(', ')})`)
+          .bind(...ids)
+          .all<{ id: string }>();
+        bookmarkIds.push(...bookmarks.results.map((row) => row.id));
+      }
+    }
+    await database.batch([
+      ...bookmarkIds.map((id) => database.prepare('DELETE FROM bookmarks WHERE id = ?').bind(id)),
+      ...folderIds.map((id) =>
+        database.prepare('DELETE FROM bookmark_folders WHERE id = ?').bind(id),
+      ),
+      database.prepare(
+        "UPDATE bookmark_domain_state SET revision = revision + 1 WHERE name = 'bookmarks'",
+      ),
+    ]);
+    return rootCount;
+  };
+
   return {
     getSnapshot: () => readSnapshot(database),
+    getTrash: async () => {
+      await expireTrash();
+      return readTrash(database);
+    },
+    expireTrash,
     executeCommand,
   };
 };

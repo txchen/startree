@@ -6,8 +6,11 @@ import {
   bookmarkCommandSchema,
   bookmarkSnapshotEtag,
   bookmarkSnapshotSchema,
+  bookmarkTrashEtag,
+  bookmarkTrashSchema,
   type BookmarkCommand,
   type BookmarkSnapshot,
+  type BookmarkTrash,
 } from '../../shared/bookmarks/contracts';
 import { indexedDbRequest } from '../app/indexed-db';
 import { BOOKMARK_DATABASE_NAME } from '../app/local-data';
@@ -63,6 +66,7 @@ export class UnknownBookmarkCommandError extends Error {
 export const createFetchBookmarkAdapter = (
   fetcher: typeof fetch = fetch,
 ): BookmarkRemoteAdapter & {
+  readTrash(revision: number | null, signal?: AbortSignal): Promise<BookmarkTrash | null>;
   executeCommand(
     command: BookmarkCommand,
     signal?: AbortSignal,
@@ -78,6 +82,17 @@ export const createFetchBookmarkAdapter = (
     if (response.status === 304) return null;
     if (!response.ok) throw new Error(`Bookmark snapshot request failed with ${response.status}.`);
     return v.parse(bookmarkSnapshotSchema, await response.json());
+  },
+  async readTrash(revision, signal) {
+    const headers =
+      revision === null ? undefined : { 'If-None-Match': bookmarkTrashEtag(revision) };
+    const response = await fetcher('/api/bookmarks/trash', {
+      ...(headers ? { headers } : {}),
+      signal,
+    });
+    if (response.status === 304) return null;
+    if (!response.ok) throw new Error(`Bookmark Trash request failed with ${response.status}.`);
+    return v.parse(bookmarkTrashSchema, await response.json());
   },
   async executeCommand(command, signal) {
     const validatedCommand = v.parse(bookmarkCommandSchema, command);

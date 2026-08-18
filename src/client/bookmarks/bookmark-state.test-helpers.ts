@@ -1,4 +1,8 @@
-import type { BookmarkCommand, BookmarkSnapshot } from '../../shared/bookmarks/contracts';
+import type {
+  BookmarkCommand,
+  BookmarkSnapshot,
+  BookmarkTrash,
+} from '../../shared/bookmarks/contracts';
 import type {
   BookmarkLifecycleAdapter,
   BookmarkNavigation,
@@ -9,12 +13,21 @@ import type {
 export type MemoryBookmarkRemoteAdapter = BookmarkRemoteAdapter & {
   readonly requestedRevisions: Array<number | null>;
   setSnapshot(snapshot: BookmarkSnapshot): void;
+  setTrash(trash: BookmarkTrash): void;
 };
 
 export const createMemoryBookmarkRemoteAdapter = (
   initialSnapshot: BookmarkSnapshot,
 ): MemoryBookmarkRemoteAdapter => {
   let snapshot = structuredClone(initialSnapshot);
+  let trash: BookmarkTrash = {
+    wireFormatVersion: 1,
+    revision: initialSnapshot.revision,
+    roots: [],
+    folders: [],
+    bookmarks: [],
+    tags: [],
+  };
   const requestedRevisions: Array<number | null> = [];
   return {
     requestedRevisions,
@@ -22,8 +35,14 @@ export const createMemoryBookmarkRemoteAdapter = (
       requestedRevisions.push(revision);
       return revision === snapshot.revision ? null : structuredClone(snapshot);
     },
+    async readTrash(revision) {
+      return revision === trash.revision ? null : structuredClone(trash);
+    },
     setSnapshot(replacement) {
       snapshot = structuredClone(replacement);
+    },
+    setTrash(replacement) {
+      trash = structuredClone(replacement);
     },
   };
 };
