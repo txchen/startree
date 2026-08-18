@@ -19,6 +19,7 @@ jobs:
           node-version: '22'
           cache: true
       - run: vp install --frozen-lockfile
+      - run: npx playwright install --with-deps chromium
       - run: vp run check
       - run: vp run test
       - run: vp run build

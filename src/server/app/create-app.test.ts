@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
+import { SYSTEM_ROOT_FOLDER_ID, type BookmarkSnapshot } from '../../shared/bookmarks/contracts';
 import { createApp } from './create-app';
 
 const bindings = {
@@ -7,7 +8,30 @@ const bindings = {
   ASSETS: { fetch: () => Promise.resolve(new Response('asset')) },
 };
 
-const createTestApp = () => createApp<typeof bindings>(() => Promise.resolve(7));
+const snapshot: BookmarkSnapshot = {
+  wireFormatVersion: 1,
+  revision: 7,
+  folders: [
+    {
+      id: SYSTEM_ROOT_FOLDER_ID,
+      name: '',
+      parentId: null,
+      rank: '0',
+      createdAt: '1970-01-01T00:00:00.000Z',
+      modifiedAt: '1970-01-01T00:00:00.000Z',
+      version: 1,
+    },
+  ],
+  bookmarks: [],
+  tags: [],
+  sequences: [{ folderId: SYSTEM_ROOT_FOLDER_ID, folderVersion: 1, bookmarkVersion: 1 }],
+};
+
+const createTestApp = () =>
+  createApp<typeof bindings>({
+    readBookmarkRevision: () => Promise.resolve(7),
+    readBookmarkSnapshot: () => Promise.resolve(snapshot),
+  });
 
 describe('platform API', () => {
   it('returns a versioned status backed by D1', async () => {
@@ -38,5 +62,27 @@ describe('platform API', () => {
 
     expect(response.status).toBe(200);
     await expect(response.text()).resolves.toBe('asset');
+  });
+
+  it('returns the shared validated Bookmark snapshot with a private ETag', async () => {
+    const response = await createTestApp().request('/api/bookmarks/snapshot', undefined, bindings);
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get('etag')).toBe('"bookmarks-1-7"');
+    expect(response.headers.get('cache-control')).toBe('private, no-store');
+    await expect(response.json()).resolves.toEqual(snapshot);
+  });
+
+  it('returns 304 when the Bookmark snapshot ETag matches', async () => {
+    const response = await createTestApp().request(
+      '/api/bookmarks/snapshot',
+      { headers: { 'If-None-Match': '"bookmarks-1-7"' } },
+      bindings,
+    );
+
+    expect(response.status).toBe(304);
+    expect(response.headers.get('etag')).toBe('"bookmarks-1-7"');
+    expect(response.headers.get('cache-control')).toBe('private, no-store');
+    await expect(response.text()).resolves.toBe('');
   });
 });

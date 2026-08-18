@@ -96,25 +96,22 @@ a {
 }
 
 .bookmarks-page {
-  width: min(1080px, calc(100% - 48px));
-  margin: 0 auto;
-  padding: 76px 0;
+  display: grid;
+  grid-template-columns: 260px minmax(0, 1fr);
+  min-height: calc(100vh - 68px);
+}
+
+button {
+  color: inherit;
+  font: inherit;
 }
 
 .eyebrow {
   color: #7a5e3d;
-  font-size: 0.72rem;
+  font-size: 0.68rem;
   font-weight: 750;
   letter-spacing: 0.14em;
   text-transform: uppercase;
-}
-
-.page-heading {
-  display: flex;
-  align-items: end;
-  justify-content: space-between;
-  gap: 24px;
-  padding: 12px 0 34px;
 }
 
 h1,
@@ -128,82 +125,406 @@ h2 {
   font-family: Georgia, 'Times New Roman', serif;
 }
 
-h1 {
-  margin-bottom: 8px;
-  font-size: clamp(2.6rem, 6vw, 4.5rem);
+.folder-sidebar {
+  padding: 42px 24px;
+  border-right: 1px solid #d9d3c7;
+  background: #ebe7dd;
+}
+
+.sidebar-heading {
+  padding: 0 10px 24px;
+}
+
+.sidebar-heading h2 {
+  margin: 5px 0 0;
+  font-size: 1.45rem;
+  font-weight: 500;
+}
+
+.root-folder,
+.folder-tree-row {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  border-radius: 8px;
+}
+
+.root-folder {
+  gap: 9px;
+  padding: 10px 12px;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  text-align: left;
+}
+
+.root-folder.selected,
+.folder-tree-row.selected {
+  color: #294535;
+  background: #d8e1d7;
+  font-weight: 700;
+}
+
+.folder-tree-list {
+  margin: 4px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.folder-tree-list .folder-tree-list {
+  margin-left: 16px;
+}
+
+.folder-tree-row {
+  min-width: 0;
+}
+
+.tree-toggle,
+.tree-folder {
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+}
+
+.tree-toggle,
+.tree-spacer {
+  display: grid;
+  width: 28px;
+  flex: 0 0 28px;
+  place-items: center;
+  color: #777169;
+}
+
+.tree-folder {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  gap: 8px;
+  padding: 9px 7px 9px 2px;
+  overflow: hidden;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bookmarks-workspace {
+  width: min(1120px, 100%);
+  padding: 48px clamp(28px, 5vw, 72px) 80px;
+}
+
+.navigation-notice {
+  padding: 12px 16px;
+  border: 1px solid #cab995;
+  border-radius: 8px;
+  color: #684f2e;
+  background: #f3ead8;
+}
+
+.breadcrumb {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin-bottom: 28px;
+  color: #746e64;
+  font-size: 0.85rem;
+}
+
+.breadcrumb button {
+  padding: 0;
+  border: 0;
+  color: #54685b;
+  background: transparent;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.library-heading {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 24px;
+  padding-bottom: 38px;
+  border-bottom: 1px solid #d8d1c4;
+}
+
+.library-heading h1,
+.library-state h1 {
+  margin: 6px 0 0;
+  font-size: clamp(2.6rem, 5vw, 4.2rem);
   font-weight: 500;
   letter-spacing: -0.04em;
 }
 
-.page-heading p,
-.empty-state p {
-  color: #6c675f;
-  line-height: 1.65;
-}
-
-.foundation-badge {
-  padding: 8px 12px;
-  border: 1px solid #b7c6ba;
-  border-radius: 999px;
-  color: #395c48;
-  background: #e9efe9;
-  font-size: 0.75rem;
-  font-weight: 700;
+.item-count {
+  padding-bottom: 8px;
+  color: #756f65;
+  font-size: 0.8rem;
   white-space: nowrap;
 }
 
-.empty-state {
-  display: grid;
-  min-height: 340px;
-  place-items: center;
-  align-content: center;
-  padding: 48px 24px;
-  border: 1px dashed #c9c1b4;
-  border-radius: 20px;
-  text-align: center;
-  background: rgb(255 255 255 / 30%);
+.child-folders,
+.bookmark-section {
+  padding-top: 34px;
 }
 
-.empty-mark {
-  display: grid;
-  width: 48px;
-  height: 48px;
-  margin-bottom: 20px;
-  place-items: center;
-  border-radius: 50%;
-  color: #f7f4ed;
-  background: #a87346;
-  font-size: 1.3rem;
-}
-
-.empty-state h2 {
-  margin-bottom: 8px;
-  font-size: 1.55rem;
+.child-folders h2,
+.bookmark-section h2 {
+  margin-bottom: 16px;
+  font-size: 1.1rem;
   font-weight: 500;
 }
 
-.empty-state p {
-  max-width: 450px;
-  margin-bottom: 0;
+.folder-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: 12px;
 }
 
-@media (max-width: 640px) {
+.folder-grid button {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 12px;
+  padding: 17px;
+  border: 1px solid #d8d1c4;
+  border-radius: 11px;
+  background: #faf8f3;
+  cursor: pointer;
+  text-align: left;
+}
+
+.folder-icon {
+  display: grid;
+  width: 34px;
+  height: 30px;
+  place-items: center;
+  border-radius: 7px;
+  color: #654a2e;
+  background: #eadbc4;
+}
+
+.bookmark-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(270px, 1fr));
+  gap: 14px;
+}
+
+.bookmark-card {
+  display: grid;
+  min-height: 164px;
+  grid-template-columns: auto 1fr auto;
+  align-items: start;
+  gap: 13px;
+  padding: 20px;
+  border: 1px solid #d8d1c4;
+  border-radius: 12px;
+  background: #faf8f3;
+  text-decoration: none;
+  transition:
+    border-color 120ms ease,
+    transform 120ms ease;
+}
+
+.bookmark-card:hover {
+  border-color: #9ea99f;
+  transform: translateY(-1px);
+}
+
+.bookmark-favicon {
+  display: grid;
+  width: 34px;
+  height: 34px;
+  place-items: center;
+  overflow: hidden;
+  border-radius: 9px;
+  color: #f8f5ee;
+  background: #486452;
+  font-weight: 750;
+}
+
+.bookmark-favicon img {
+  width: 20px;
+  height: 20px;
+}
+
+.bookmark-copy {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+}
+
+.bookmark-copy strong {
+  overflow: hidden;
+  font-family: Georgia, 'Times New Roman', serif;
+  font-size: 1.08rem;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bookmark-host {
+  margin-top: 3px;
+  overflow: hidden;
+  color: #746e64;
+  font-size: 0.76rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bookmark-note {
+  display: -webkit-box;
+  margin-top: 14px;
+  overflow: hidden;
+  color: #5f5b54;
+  font-size: 0.83rem;
+  line-height: 1.45;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.bookmark-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-top: 14px;
+}
+
+.bookmark-tags span {
+  padding: 3px 7px;
+  border-radius: 999px;
+  color: #4c624f;
+  background: #e3ebe2;
+  font-size: 0.68rem;
+}
+
+.bookmark-arrow {
+  color: #8b857b;
+}
+
+.library-state {
+  display: grid;
+  min-height: 440px;
+  place-items: center;
+  align-content: center;
+  text-align: center;
+}
+
+.library-state.empty {
+  min-height: 320px;
+}
+
+.library-state p {
+  max-width: 480px;
+  color: #6c675f;
+  line-height: 1.6;
+}
+
+.library-state button {
+  padding: 9px 14px;
+  border: 1px solid #9aa79c;
+  border-radius: 8px;
+  color: #294535;
+  background: #e5ece4;
+  cursor: pointer;
+}
+
+.state-mark {
+  display: grid;
+  width: 48px;
+  height: 48px;
+  margin-bottom: 18px;
+  place-items: center;
+  border-radius: 50%;
+  color: #f8f5ee;
+  background: #9d6c43;
+  font-size: 1.2rem;
+}
+
+.mobile-folder-button,
+.drawer-backdrop {
+  display: none;
+}
+
+@media (max-width: 760px) {
   .app-bar {
     grid-template-columns: 1fr auto;
     padding: 0 20px;
   }
 
-  .privacy-status {
+  .privacy-status,
+  .folder-sidebar {
     display: none;
   }
 
   .bookmarks-page {
-    width: min(100% - 32px, 1080px);
-    padding: 48px 0;
+    display: block;
   }
 
-  .page-heading {
+  .mobile-folder-button {
+    display: flex;
+    position: sticky;
+    z-index: 4;
+    top: 8px;
+    width: fit-content;
+    align-items: center;
+    gap: 7px;
+    margin: 16px 20px 0;
+    padding: 8px 11px;
+    border: 1px solid #cbc4b8;
+    border-radius: 8px;
+    background: #faf8f3;
+  }
+
+  .bookmarks-workspace {
+    padding: 28px 20px 56px;
+  }
+
+  .library-heading {
     align-items: start;
     flex-direction: column;
+    gap: 10px;
+  }
+
+  .item-count {
+    padding-bottom: 0;
+  }
+
+  .bookmark-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .drawer-backdrop {
+    display: block;
+    position: fixed;
+    z-index: 10;
+    inset: 0;
+    background: rgb(31 34 30 / 45%);
+  }
+
+  .folder-drawer {
+    width: min(86vw, 340px);
+    height: 100%;
+    padding: 24px 20px;
+    overflow-y: auto;
+    background: #f0ece3;
+    box-shadow: 10px 0 30px rgb(0 0 0 / 15%);
+  }
+
+  .drawer-heading {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 8px 18px;
+  }
+
+  .drawer-heading h2 {
+    margin: 0;
+  }
+
+  .drawer-heading button {
+    border: 0;
+    background: transparent;
+    font-size: 1.7rem;
   }
 }

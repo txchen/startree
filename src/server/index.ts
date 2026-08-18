@@ -1,4 +1,5 @@
 import { createApp } from './app/create-app';
+import { createBookmarkService } from './bookmarks/bookmark-service';
 
 type RevisionRow = { revision: number };
 
@@ -10,4 +11,7 @@ const readBookmarkRevision = async (bindings: Env): Promise<number> => {
   return row?.revision ?? 0;
 };
 
-export default createApp<Env>(readBookmarkRevision);
+export default createApp<Env>({
+  readBookmarkRevision,
+  readBookmarkSnapshot: (bindings) => createBookmarkService(bindings.DB).getSnapshot(),
+});
