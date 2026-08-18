@@ -111,6 +111,7 @@ try {
     await page.locator('.folder-grid button').filter({ hasText: 'Reading' }).click();
     await page.waitForURL(`**/bookmarks/10000000-0000-4000-8000-000000000001`);
     await page.getByRole('heading', { level: 1, name: 'Reading' }).waitFor();
+    await page.getByRole('button', { name: 'Edit', exact: true }).click();
 
     await page.getByRole('button', { name: 'New Folder' }).click();
     const folderNameInput = page.getByLabel('Folder name');
@@ -167,7 +168,7 @@ try {
     await page.unrouteAll({ behavior: 'wait' });
 
     await page.route('**/api/bookmarks/commands', (route) =>
-      route.fulfill({ status: 500, contentType: 'application/json', body: '{}' }),
+      route.fulfill({ status: 400, contentType: 'application/json', body: '{}' }),
     );
     await page
       .locator('.bookmark-card-shell', { hasText: 'UI Bookmark Edited' })
@@ -196,6 +197,10 @@ try {
     await page.unrouteAll({ behavior: 'wait' });
     await page.getByRole('button', { name: 'Retry same operation' }).click();
     await page.getByText('The save result is unknown.').waitFor({ state: 'detached' });
+    await page.getByRole('button', { name: 'Done' }).click();
+    if (await page.getByRole('button', { name: 'New Folder' }).count()) {
+      throw new Error('Done did not return the desktop Bookmarks Page to Browse Mode.');
+    }
 
     const bookmarkAnchor = page.getByRole('link', { name: /Example Reference/ });
     if ((await bookmarkAnchor.getAttribute('href')) !== 'https://example.com/reference') {

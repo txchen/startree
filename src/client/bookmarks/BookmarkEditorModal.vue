@@ -1,7 +1,11 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref } from 'vue';
 
-import type { Bookmark, BookmarkFolder } from '../../shared/bookmarks/contracts';
+import {
+  bookmarkTitleFor,
+  type Bookmark,
+  type BookmarkFolder,
+} from '../../shared/bookmarks/contracts';
 
 const props = defineProps<{
   kind: 'folder' | 'bookmark';
@@ -62,7 +66,9 @@ const requestClose = () => {
 const fillHostname = () => {
   if (title.value.trim() || !URL.canParse(url.value)) return;
   const destination = new URL(url.value);
-  if (['http:', 'https:'].includes(destination.protocol)) title.value = destination.hostname;
+  if (['http:', 'https:'].includes(destination.protocol)) {
+    title.value = bookmarkTitleFor(url.value);
+  }
 };
 
 const submit = () => {
@@ -74,10 +80,7 @@ const submit = () => {
           url: url.value,
           title: title.value,
           note: note.value,
-          tags: tags.value
-            .split(',')
-            .map((tag) => tag.trim())
-            .filter(Boolean),
+          tags: tags.value.trim() ? tags.value.split(',').map((tag) => tag.trim()) : [],
         },
   );
 };
@@ -105,7 +108,7 @@ onUnmounted(() => document.removeEventListener('keydown', handleKeydown));
     >
       <header>
         <div>
-          <span class="eyebrow">Library Editor</span>
+          <span class="eyebrow">Bookmarks Editor</span>
           <h2 id="editor-title">{{ heading }}</h2>
         </div>
         <button type="button" aria-label="Close editor" :disabled="saving" @click="requestClose">

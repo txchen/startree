@@ -482,6 +482,10 @@ h2 {
   color: #395c48;
 }
 
+.library-actions .edit-mode-button {
+  color: #395c48;
+}
+
 .child-folders,
 .bookmark-section {
   padding-top: 34px;

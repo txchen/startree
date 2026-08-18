@@ -74,7 +74,7 @@ describe('Bookmark command contract', () => {
       type: 'createBookmark' as const,
       operationId,
       folderId: SYSTEM_ROOT_FOLDER_ID,
-      parentBookmarkVersion: 1,
+      expectedBookmarkSequenceVersion: 1,
       url: 'https://example.com',
       title: 'Example',
       note: '',
@@ -86,7 +86,7 @@ describe('Bookmark command contract', () => {
             type: 'createFolder' as const,
             operationId,
             parentId: SYSTEM_ROOT_FOLDER_ID,
-            parentFolderVersion: 1,
+            expectedFolderSequenceVersion: 1,
             name: 'x',
           }
         : base;
@@ -132,7 +132,7 @@ describe('Bookmark command contract', () => {
       type: 'createFolder' as const,
       operationId,
       parentId: SYSTEM_ROOT_FOLDER_ID,
-      parentFolderVersion: 1,
+      expectedFolderSequenceVersion: 1,
       name: '  Reading  ',
     };
 
@@ -153,5 +153,20 @@ describe('Bookmark command contract', () => {
     expect(
       normalizeBookmarkTags(Array.from({ length: 50 }, (_, index) => `tag-${index}`)),
     ).toHaveLength(50);
+  });
+
+  it('validates Tag length and count below, at, and above their limits', () => {
+    expect(normalizeBookmarkTags(['x'.repeat(63)])).toEqual(['x'.repeat(63)]);
+    expect(normalizeBookmarkTags(['x'.repeat(64)])).toEqual(['x'.repeat(64)]);
+    expect(() => normalizeBookmarkTags(['x'.repeat(65)])).toThrow();
+    expect(
+      normalizeBookmarkTags(Array.from({ length: 49 }, (_, index) => `tag-${index}`)),
+    ).toHaveLength(49);
+    expect(
+      normalizeBookmarkTags(Array.from({ length: 50 }, (_, index) => `tag-${index}`)),
+    ).toHaveLength(50);
+    expect(() =>
+      normalizeBookmarkTags(Array.from({ length: 51 }, (_, index) => `tag-${index}`)),
+    ).toThrow();
   });
 });

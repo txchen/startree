@@ -61,7 +61,7 @@ describe('production Bookmark adapters', () => {
       type: 'createFolder',
       operationId: 'a0000000-0000-4000-8000-000000000001',
       parentId: SYSTEM_ROOT_FOLDER_ID,
-      parentFolderVersion: 1,
+      expectedFolderSequenceVersion: 1,
       name: 'Reading',
     };
     const result = {
@@ -95,6 +95,24 @@ describe('production Bookmark adapters', () => {
     const command: BookmarkCommand = {
       type: 'editFolder',
       operationId: 'a0000000-0000-4000-8000-000000000002',
+      folderId: SYSTEM_ROOT_FOLDER_ID,
+      folderVersion: 1,
+      name: 'Reading',
+    };
+
+    await expect(adapter.executeCommand(command)).rejects.toBeInstanceOf(
+      UnknownBookmarkCommandError,
+    );
+  });
+
+  it.each([
+    ['a server failure', new Response('{}', { status: 500 })],
+    ['a malformed acknowledged response', Response.json({ status: 'acknowledged' })],
+  ])('classifies %s as an unknown commit outcome', async (_label, response) => {
+    const adapter = createFetchBookmarkAdapter(vi.fn<typeof fetch>().mockResolvedValue(response));
+    const command: BookmarkCommand = {
+      type: 'editFolder',
+      operationId: 'a0000000-0000-4000-8000-000000000004',
       folderId: SYSTEM_ROOT_FOLDER_ID,
       folderVersion: 1,
       name: 'Reading',
@@ -234,7 +252,7 @@ describe('production Bookmark adapters', () => {
       type: 'createFolder',
       operationId: 'a0000000-0000-4000-8000-000000000003',
       parentId: SYSTEM_ROOT_FOLDER_ID,
-      parentFolderVersion: 1,
+      expectedFolderSequenceVersion: 1,
       name: 'Reading',
     };
 

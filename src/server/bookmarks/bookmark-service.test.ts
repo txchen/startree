@@ -267,7 +267,7 @@ describe('Bookmark Service Interface', () => {
       type: 'createFolder' as const,
       operationId: 'a0000000-0000-4000-8000-000000000001',
       parentId: SYSTEM_ROOT_FOLDER_ID,
-      parentFolderVersion: 1,
+      expectedFolderSequenceVersion: 1,
       name: '  Work  ',
     };
 
@@ -276,7 +276,7 @@ describe('Bookmark Service Interface', () => {
     const caseVariant = await service.executeCommand({
       ...command,
       operationId: 'a0000000-0000-4000-8000-000000000002',
-      parentFolderVersion: 2,
+      expectedFolderSequenceVersion: 2,
       name: '  work  ',
     });
 
@@ -304,7 +304,7 @@ describe('Bookmark Service Interface', () => {
       type: 'createFolder',
       operationId: 'a1000000-0000-4000-8000-000000000001',
       parentId: SYSTEM_ROOT_FOLDER_ID,
-      parentFolderVersion: 1,
+      expectedFolderSequenceVersion: 1,
       name: 'Reading',
     });
 
@@ -312,7 +312,7 @@ describe('Bookmark Service Interface', () => {
       type: 'createFolder',
       operationId: 'a1000000-0000-4000-8000-000000000002',
       parentId: SYSTEM_ROOT_FOLDER_ID,
-      parentFolderVersion: 2,
+      expectedFolderSequenceVersion: 2,
       name: 'Reading',
     });
     const stale = await service.executeCommand({
@@ -342,7 +342,7 @@ describe('Bookmark Service Interface', () => {
       type: 'createBookmark',
       operationId: 'a2000000-0000-4000-8000-000000000001',
       folderId: SYSTEM_ROOT_FOLDER_ID,
-      parentBookmarkVersion: 1,
+      expectedBookmarkSequenceVersion: 1,
       url: 'https://example.com/path',
       note: '',
       tags: [' Travel ', 'travel', 'CAFÉ'],
@@ -351,7 +351,7 @@ describe('Bookmark Service Interface', () => {
       type: 'createBookmark',
       operationId: 'a2000000-0000-4000-8000-000000000002',
       folderId: SYSTEM_ROOT_FOLDER_ID,
-      parentBookmarkVersion: 2,
+      expectedBookmarkSequenceVersion: 2,
       url: 'https://example.com/path',
       title: 'Duplicate',
       note: '',
@@ -399,7 +399,7 @@ describe('Bookmark Service Interface', () => {
       type: 'createFolder',
       operationId: 'a3000000-0000-4000-8000-000000000001',
       parentId: SYSTEM_ROOT_FOLDER_ID,
-      parentFolderVersion: 1,
+      expectedFolderSequenceVersion: 1,
       name: 'First',
     });
 
@@ -408,7 +408,7 @@ describe('Bookmark Service Interface', () => {
         type: 'createFolder',
         operationId: 'a3000000-0000-4000-8000-000000000002',
         parentId: SYSTEM_ROOT_FOLDER_ID,
-        parentFolderVersion: 2,
+        expectedFolderSequenceVersion: 2,
         name: 'Second',
       }),
     ).rejects.toThrow();

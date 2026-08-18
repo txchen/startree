@@ -110,7 +110,7 @@ describe('platform API', () => {
           type: 'createFolder',
           operationId: 'a0000000-0000-4000-8000-000000000001',
           parentId: SYSTEM_ROOT_FOLDER_ID,
-          parentFolderVersion: 1,
+          expectedFolderSequenceVersion: 1,
           name: 'Reading',
         }),
       },
@@ -208,5 +208,20 @@ describe('platform API', () => {
 
     expect(response.status).toBe(400);
     await expect(response.json()).resolves.toMatchObject({ error: { code: 'invalid_command' } });
+  });
+
+  it('rejects an oversized streamed command without trusting Content-Length', async () => {
+    const response = await createTestApp().request(
+      'http://startree.local/api/bookmarks/commands',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Origin: 'http://startree.local' },
+        body: 'x'.repeat(1024 * 1024 + 1),
+      },
+      bindings,
+    );
+
+    expect(response.status).toBe(413);
+    await expect(response.json()).resolves.toMatchObject({ error: { code: 'request_too_large' } });
   });
 });

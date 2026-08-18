@@ -57,12 +57,13 @@ export const createFetchBookmarkAdapter = (
     return v.parse(bookmarkSnapshotSchema, await response.json());
   },
   async executeCommand(command, signal) {
+    const validatedCommand = v.parse(bookmarkCommandSchema, command);
     let response: Response;
     try {
       response = await fetcher('/api/bookmarks/commands', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(v.parse(bookmarkCommandSchema, command)),
+        body: JSON.stringify(validatedCommand),
         signal,
       });
     } catch (error) {
@@ -70,10 +71,19 @@ export const createFetchBookmarkAdapter = (
         cause: error,
       });
     }
+    if (response.status >= 500) {
+      throw new UnknownBookmarkCommandError('The Bookmark command result is unknown.');
+    }
     if (!response.ok && response.status !== 409) {
       throw new Error(`Bookmark command request failed with ${response.status}.`);
     }
-    return v.parse(bookmarkCommandResultSchema, await response.json());
+    try {
+      return v.parse(bookmarkCommandResultSchema, await response.json());
+    } catch (error) {
+      throw new UnknownBookmarkCommandError('The Bookmark command result is unknown.', {
+        cause: error,
+      });
+    }
   },
 });
 

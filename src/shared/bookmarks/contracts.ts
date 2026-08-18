@@ -55,6 +55,9 @@ export const normalizeBookmarkTags = (values: string[]): string[] => {
   );
 };
 
+export const bookmarkTitleFor = (url: string, title?: string): string =>
+  title ?? new URL(url).hostname;
+
 export const bookmarkFolderSchema = v.pipe(
   v.object({
     id: identifierSchema,
@@ -116,7 +119,7 @@ export const createFolderCommandSchema = v.object({
   ...commandBase,
   type: v.literal('createFolder'),
   parentId: identifierSchema,
-  parentFolderVersion: entityVersionSchema,
+  expectedFolderSequenceVersion: entityVersionSchema,
   name: folderNameSchema,
 });
 
@@ -132,7 +135,7 @@ export const createBookmarkCommandSchema = v.object({
   ...commandBase,
   type: v.literal('createBookmark'),
   folderId: identifierSchema,
-  parentBookmarkVersion: entityVersionSchema,
+  expectedBookmarkSequenceVersion: entityVersionSchema,
   url: bookmarkUrlSchema,
   title: v.optional(bookmarkTitleSchema),
   note: bookmarkNoteSchema,

@@ -2,6 +2,7 @@ import * as v from 'valibot';
 
 import {
   BOOKMARK_SNAPSHOT_WIRE_FORMAT_VERSION,
+  bookmarkTitleFor,
   bookmarkCommandResultSchema,
   bookmarkCommandSchema,
   bookmarkSnapshotSchema,
@@ -241,7 +242,7 @@ export const createBookmarkService = (
           .first<{ id: string }>(),
       ]);
       if (!parent || !sequence) return conflict(command, 'missing_entity');
-      if (sequence.folderVersion !== command.parentFolderVersion) {
+      if (sequence.folderVersion !== command.expectedFolderSequenceVersion) {
         return conflict(command, 'stale_sequence', { sequenceFolderId: command.parentId });
       }
       if (duplicate) return conflict(command, 'name_conflict', { folderId: duplicate.id });
@@ -287,7 +288,7 @@ export const createBookmarkService = (
             command.operationId,
             revision,
             command.parentId,
-            command.parentFolderVersion,
+            command.expectedFolderSequenceVersion,
             command.parentId,
             command.name,
           ),
@@ -397,7 +398,7 @@ export const createBookmarkService = (
         sequenceStatement(database, command.folderId).first<SequenceRow>(),
       ]);
       if (!folder || !sequence) return conflict(command, 'missing_entity');
-      if (sequence.bookmarkVersion !== command.parentBookmarkVersion) {
+      if (sequence.bookmarkVersion !== command.expectedBookmarkSequenceVersion) {
         return conflict(command, 'stale_sequence', { sequenceFolderId: command.folderId });
       }
       const tags = normalizeBookmarkTags(command.tags);
@@ -405,7 +406,7 @@ export const createBookmarkService = (
         id: randomUUID(),
         folderId: command.folderId,
         url: command.url,
-        title: command.title ?? new URL(command.url).hostname,
+        title: bookmarkTitleFor(command.url, command.title),
         note: command.note,
         rank: await nextRank(database, 'bookmarks', 'folder_id', command.folderId),
         createdAt: timestamp,
@@ -435,7 +436,12 @@ export const createBookmarkService = (
                AND (SELECT version FROM bookmark_sequences WHERE folder_id = ? AND kind = 'bookmarks') = ?
              THEN 1 ELSE 0 END`,
           )
-          .bind(command.operationId, revision, command.folderId, command.parentBookmarkVersion),
+          .bind(
+            command.operationId,
+            revision,
+            command.folderId,
+            command.expectedBookmarkSequenceVersion,
+          ),
         database
           .prepare(
             `INSERT INTO bookmarks

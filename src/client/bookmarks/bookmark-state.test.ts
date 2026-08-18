@@ -442,7 +442,7 @@ describe('Bookmark state Module Interface', () => {
       type: 'createFolder' as const,
       operationId: 'a0000000-0000-4000-8000-000000000001',
       parentId: folderId,
-      parentFolderVersion: 1,
+      expectedFolderSequenceVersion: 1,
       name: 'Optimistic',
     };
 
@@ -593,6 +593,69 @@ describe('Bookmark state Module Interface', () => {
     ]);
 
     expect(maximumActive).toBe(1);
+    state.dispose();
+  });
+
+  it('refreshes the complete snapshot when a conflict reports a revision gap', async () => {
+    const remote = createMemoryBookmarkRemoteAdapter(snapshot());
+    remote.executeCommand = (command) =>
+      Promise.resolve({
+        status: 'conflict',
+        operationId: command.operationId,
+        code: 'stale_entity',
+        revision: 3,
+        folders: [{ ...snapshot().folders[1]!, name: 'Authoritative', version: 2 }],
+        bookmarks: [],
+        tags: [],
+        sequences: [],
+      });
+    const authoritative = snapshot(3);
+    authoritative.folders[1] = { ...authoritative.folders[1]!, name: 'Authoritative', version: 2 };
+    const state = createBookmarkState({
+      remote,
+      storage: createMemoryBookmarkStorageAdapter(),
+      lifecycle: createMemoryBookmarkLifecycleAdapter(),
+    });
+    await state.initialize({ folderId });
+    remote.setSnapshot(authoritative);
+
+    await state.executeCommand({
+      type: 'editFolder',
+      operationId: 'a0000000-0000-4000-8000-000000000006',
+      folderId,
+      folderVersion: 1,
+      name: 'Stale',
+    });
+
+    expect(state.getState()).toMatchObject({
+      writeStatus: 'conflict',
+      snapshotRevision: 3,
+      selectedFolder: { name: 'Authoritative', version: 2 },
+    });
+    expect(remote.requestedRevisions).toEqual([null, 1]);
+    state.dispose();
+  });
+
+  it('rejects writes while offline without recording an unconfirmed operation', async () => {
+    const lifecycle = createMemoryBookmarkLifecycleAdapter();
+    const remote = createMemoryBookmarkRemoteAdapter(snapshot());
+    remote.executeCommand = vi.fn();
+    const storage = createMemoryBookmarkStorageAdapter();
+    const state = createBookmarkState({ remote, storage, lifecycle });
+    await state.initialize({ folderId });
+    lifecycle.setOnline(false);
+
+    await state.executeCommand({
+      type: 'editFolder',
+      operationId: 'a0000000-0000-4000-8000-000000000007',
+      folderId,
+      folderVersion: 1,
+      name: 'Offline change',
+    });
+
+    expect(remote.executeCommand).not.toHaveBeenCalled();
+    expect(state.getState().writeStatus).toBe('failed');
+    expect(await storage.readUnconfirmedOperations?.()).toEqual([]);
     state.dispose();
   });
 });

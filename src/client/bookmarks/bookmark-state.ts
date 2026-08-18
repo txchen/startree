@@ -6,7 +6,11 @@ import type {
   BookmarkSequence,
   BookmarkSnapshot,
 } from '../../shared/bookmarks/contracts';
-import { normalizeBookmarkTags, SYSTEM_ROOT_FOLDER_ID } from '../../shared/bookmarks/contracts';
+import {
+  bookmarkTitleFor,
+  normalizeBookmarkTags,
+  SYSTEM_ROOT_FOLDER_ID,
+} from '../../shared/bookmarks/contracts';
 import type { BookmarkSearchAdapter, BookmarkSearchResult } from './bookmark-search';
 
 export type BookmarkNavigation = {
@@ -352,7 +356,7 @@ export const createBookmarkState = (adapters: {
         id: command.operationId,
         folderId: command.folderId,
         url: command.url,
-        title: command.title ?? new URL(command.url).hostname,
+        title: bookmarkTitleFor(command.url, command.title),
         note: command.note,
         rank: 'zzzz',
         createdAt: timestamp,
@@ -416,6 +420,12 @@ export const createBookmarkState = (adapters: {
   const performCommand = async (
     command: BookmarkCommand,
   ): Promise<BookmarkCommandResult | null> => {
+    if (!lifecycle.isOnline()) {
+      state.writeStatus = 'failed';
+      state.writeMessage = 'Editing requires an online connection.';
+      emit();
+      return null;
+    }
     if (!state.snapshot || !adapters.remote.executeCommand) {
       state.writeStatus = 'failed';
       state.writeMessage = 'Editing is not available.';
@@ -439,7 +449,11 @@ export const createBookmarkState = (adapters: {
       lifecycle.clearTimeout(pendingTimer);
       state.snapshot = priorSnapshot;
       if (result.status === 'conflict') {
-        state.snapshot = mergeCommandResult(state.snapshot, result);
+        if (result.revision === priorSnapshot.revision) {
+          state.snapshot = mergeCommandResult(state.snapshot, result);
+        } else {
+          await refresh();
+        }
         state.writeStatus = 'conflict';
         state.writeMessage = 'The item changed elsewhere. Review the current authoritative data.';
         emit();

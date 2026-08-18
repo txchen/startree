@@ -23,6 +23,7 @@ const editor = ref<{
   bookmark?: Bookmark;
 } | null>(null);
 const desktopEditingAvailable = ref(false);
+const editMode = ref(false);
 const stateModule = createBookmarkState({
   remote: createFetchBookmarkAdapter(),
   storage: createIndexedDbBookmarkAdapter(),
@@ -33,10 +34,22 @@ let unsubscribe: (() => void) | undefined;
 let desktopMedia: MediaQueryList | undefined;
 const updateDesktopEditing = () => {
   desktopEditingAvailable.value = desktopMedia?.matches ?? false;
-  if (!desktopEditingAvailable.value) editor.value = null;
+  if (!desktopEditingAvailable.value) {
+    editor.value = null;
+    editMode.value = false;
+  }
 };
 
 const searchOpen = computed(() => state.value.searchQuery.trim().length > 0);
+const editingAvailable = computed(
+  () => desktopEditingAvailable.value && state.value.syncStatus !== 'offline',
+);
+const editorKey = computed(() => {
+  const activeEditor = editor.value;
+  if (!activeEditor) return 'closed';
+  const entity = activeEditor.folder ?? activeEditor.bookmark;
+  return `${activeEditor.kind}:${entity?.id ?? 'new'}:${entity?.version ?? 0}`;
+});
 const selectedResultId = computed(() =>
   state.value.searchResults[selectedSearchResult.value]
     ? `search-result-${selectedSearchResult.value}`
@@ -162,7 +175,7 @@ const saveEditor = async (value: {
           type: 'createFolder',
           operationId: crypto.randomUUID(),
           parentId: selectedFolder.id,
-          parentFolderVersion: selectedSequence.value?.folderVersion ?? 1,
+          expectedFolderSequenceVersion: selectedSequence.value?.folderVersion ?? 1,
           name: value.name ?? '',
         };
   } else {
@@ -181,7 +194,7 @@ const saveEditor = async (value: {
           type: 'createBookmark',
           operationId: crypto.randomUUID(),
           folderId: selectedFolder.id,
-          parentBookmarkVersion: selectedSequence.value?.bookmarkVersion ?? 1,
+          expectedBookmarkSequenceVersion: selectedSequence.value?.bookmarkVersion ?? 1,
           url: value.url ?? '',
           title: value.title || undefined,
           note: value.note ?? '',
@@ -189,7 +202,15 @@ const saveEditor = async (value: {
         };
   }
   const result = await stateModule.executeCommand(command);
-  if (result?.status === 'acknowledged') editor.value = null;
+  if (result?.status === 'acknowledged') {
+    editor.value = null;
+  } else if (result?.status === 'conflict' && result.code === 'stale_entity') {
+    if (activeEditor.kind === 'folder' && result.folders[0]) {
+      editor.value = { kind: 'folder', folder: result.folders[0] };
+    } else if (activeEditor.kind === 'bookmark' && result.bookmarks[0]) {
+      editor.value = { kind: 'bookmark', bookmark: result.bookmarks[0] };
+    }
+  }
 };
 
 onMounted(async () => {
@@ -199,6 +220,10 @@ onMounted(async () => {
   document.addEventListener('keydown', handleGlobalKeydown);
   unsubscribe = stateModule.subscribe((replacement) => {
     state.value = replacement;
+    if (replacement.syncStatus === 'offline') {
+      editor.value = null;
+      editMode.value = false;
+    }
     const selectedFolderId = replacement.selectedFolder?.id;
     if (
       initialized.value &&
@@ -418,7 +443,15 @@ onUnmounted(() => {
               {{ state.directFolders.length }} Folders ·
               {{ state.directBookmarks.length }} Bookmarks
             </span>
-            <div v-if="desktopEditingAvailable" class="desktop-edit-controls">
+            <button
+              v-if="editingAvailable && !editMode"
+              class="edit-mode-button desktop-edit-controls"
+              type="button"
+              @click="editMode = true"
+            >
+              Edit
+            </button>
+            <div v-else-if="editingAvailable" class="desktop-edit-controls">
               <button type="button" @click="openFolderEditor()">New Folder</button>
               <button type="button" @click="openBookmarkEditor()">New Bookmark</button>
               <button
@@ -428,6 +461,7 @@ onUnmounted(() => {
               >
                 Edit Folder
               </button>
+              <button type="button" @click="editMode = false">Done</button>
             </div>
           </div>
         </header>
@@ -446,7 +480,7 @@ onUnmounted(() => {
                 <span aria-hidden="true">→</span>
               </button>
               <button
-                v-if="desktopEditingAvailable"
+                v-if="editingAvailable && editMode"
                 class="tile-edit desktop-edit-controls"
                 type="button"
                 :aria-label="`Edit ${folder.name}`"
@@ -470,7 +504,7 @@ onUnmounted(() => {
               :key="bookmark.id"
               :bookmark="bookmark"
               :tags="state.tagsByBookmark[bookmark.id] ?? []"
-              :editable="desktopEditingAvailable"
+              :editable="editingAvailable && editMode"
               @edit="openBookmarkEditor(bookmark)"
             />
           </div>
@@ -518,7 +552,8 @@ onUnmounted(() => {
     </div>
 
     <BookmarkEditorModal
-      v-if="editor && desktopEditingAvailable"
+      v-if="editor && editingAvailable && editMode"
+      :key="editorKey"
       :kind="editor.kind"
       :folder="editor.folder"
       :bookmark="editor.bookmark"

@@ -26,6 +26,29 @@ type AppServices<Bindings> = {
 
 const MAX_COMMAND_BYTES = 1024 * 1024;
 
+const readBoundedCommandBody = async (request: Request): Promise<string | null> => {
+  if (!request.body) return '';
+  const reader = request.body.getReader();
+  const decoder = new TextDecoder();
+  let byteLength = 0;
+  let body = '';
+  try {
+    while (true) {
+      const chunk = await reader.read();
+      if (chunk.done) break;
+      byteLength += chunk.value.byteLength;
+      if (byteLength > MAX_COMMAND_BYTES) {
+        await reader.cancel();
+        return null;
+      }
+      body += decoder.decode(chunk.value, { stream: true });
+    }
+    return body + decoder.decode();
+  } finally {
+    reader.releaseLock();
+  }
+};
+
 export const createApp = <Bindings extends CoreBindings>(services: AppServices<Bindings>) => {
   const app = new Hono<AppEnvironment<Bindings>>();
 
@@ -91,8 +114,8 @@ export const createApp = <Bindings extends CoreBindings>(services: AppServices<B
       );
     }
 
-    const body = await context.req.text();
-    if (new TextEncoder().encode(body).byteLength > MAX_COMMAND_BYTES) {
+    const body = await readBoundedCommandBody(context.req.raw);
+    if (body === null) {
       return errorResponse(
         context,
         413,
