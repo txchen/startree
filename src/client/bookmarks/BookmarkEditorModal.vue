@@ -6,28 +6,21 @@ import {
   type Bookmark,
   type BookmarkFolder,
 } from '../../shared/bookmarks/contracts';
-
-type EditorValue = {
-  name?: string;
-  url?: string;
-  title?: string;
-  note?: string;
-  tags?: string[];
-};
+import type { BookmarkEditorValue } from './bookmark-editor';
 
 const props = defineProps<{
   kind: 'folder' | 'bookmark';
   folder?: BookmarkFolder;
   bookmark?: Bookmark;
-  value: EditorValue;
-  initialValue: EditorValue;
+  value: BookmarkEditorValue;
+  initialValue: BookmarkEditorValue;
   saving: boolean;
 }>();
 
 const emit = defineEmits<{
   close: [];
-  save: [value: EditorValue];
-  draft: [value: EditorValue];
+  save: [value: BookmarkEditorValue];
+  draft: [value: BookmarkEditorValue];
 }>();
 
 const firstInput = ref<HTMLInputElement>();
@@ -37,7 +30,7 @@ const title = ref(props.value.title ?? '');
 const note = ref(props.value.note ?? '');
 const tags = ref(props.value.tags?.join(', ') ?? '');
 const discardPrompt = ref(false);
-const comparableValue = (): EditorValue =>
+const comparableValue = (): BookmarkEditorValue =>
   props.kind === 'folder'
     ? { name: name.value }
     : {

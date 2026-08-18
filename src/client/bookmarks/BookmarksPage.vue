@@ -6,6 +6,7 @@ import { SYSTEM_ROOT_FOLDER_ID } from '../../shared/bookmarks/contracts';
 import type { Bookmark, BookmarkCommand, BookmarkFolder } from '../../shared/bookmarks/contracts';
 import BookmarkCard from './BookmarkCard.vue';
 import BookmarkEditorModal from './BookmarkEditorModal.vue';
+import type { BookmarkEditorValue } from './bookmark-editor';
 import { createFetchBookmarkAdapter, createIndexedDbBookmarkAdapter } from './bookmark-adapters';
 import { createWorkerBookmarkSearchAdapter } from './bookmark-search';
 import { createBookmarkState, type BookmarkStateView } from './bookmark-state';
@@ -17,20 +18,13 @@ const drawerOpen = ref(false);
 const initialized = ref(false);
 const searchInput = ref<HTMLInputElement>();
 const selectedSearchResult = ref(0);
-type EditorValue = {
-  name?: string;
-  url?: string;
-  title?: string;
-  note?: string;
-  tags?: string[];
-};
 const editor = ref<{
   kind: 'folder' | 'bookmark';
   folder?: BookmarkFolder;
   bookmark?: Bookmark;
 } | null>(null);
-const editorDraft = ref<EditorValue>({});
-const editorInitialValue = ref<EditorValue>({});
+const editorDraft = ref<BookmarkEditorValue>({});
+const editorInitialValue = ref<BookmarkEditorValue>({});
 const desktopEditingAvailable = ref(false);
 const editMode = ref(false);
 const stateModule = createBookmarkState({
@@ -148,7 +142,7 @@ const selectedSequence = computed(() =>
     : undefined,
 );
 
-const copyEditorValue = (value: EditorValue): EditorValue => ({
+const copyEditorValue = (value: BookmarkEditorValue): BookmarkEditorValue => ({
   ...value,
   ...(value.tags ? { tags: [...value.tags] } : {}),
 });
@@ -176,13 +170,7 @@ const closeEditor = () => {
   editorInitialValue.value = {};
 };
 
-const saveEditor = async (value: {
-  name?: string;
-  url?: string;
-  title?: string;
-  note?: string;
-  tags?: string[];
-}) => {
+const saveEditor = async (value: BookmarkEditorValue) => {
   const activeEditor = editor.value;
   const selectedFolder = state.value.selectedFolder;
   if (!activeEditor || !selectedFolder) return;

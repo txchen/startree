@@ -658,4 +658,68 @@ describe('Bookmark state Module Interface', () => {
     expect(await storage.readUnconfirmedOperations?.()).toEqual([]);
     state.dispose();
   });
+
+  it('keeps an acknowledged authoritative result when local persistence fails', async () => {
+    const remote = createMemoryBookmarkRemoteAdapter(snapshot());
+    remote.executeCommand = (command) =>
+      Promise.resolve({
+        status: 'acknowledged',
+        operationId: command.operationId,
+        revision: 2,
+        folders: [{ ...snapshot().folders[1]!, name: 'Saved remotely', version: 2 }],
+        bookmarks: [],
+        tags: [],
+        sequences: [],
+      });
+    const storage = createMemoryBookmarkStorageAdapter();
+    const state = createBookmarkState({
+      remote,
+      storage,
+      lifecycle: createMemoryBookmarkLifecycleAdapter(),
+    });
+    await state.initialize({ folderId });
+    storage.writeSnapshot = () => Promise.reject(new Error('IndexedDB failed'));
+
+    const result = await state.executeCommand({
+      type: 'editFolder',
+      operationId: 'a0000000-0000-4000-8000-000000000008',
+      folderId,
+      folderVersion: 1,
+      name: 'Saved remotely',
+    });
+
+    expect(result?.status).toBe('acknowledged');
+    expect(state.getState()).toMatchObject({
+      snapshotRevision: 2,
+      selectedFolder: { name: 'Saved remotely', version: 2 },
+      writeStatus: 'failed',
+      writeMessage: expect.stringContaining('was saved'),
+    });
+    state.dispose();
+  });
+
+  it('exposes a persisted unconfirmed operation after restart', async () => {
+    const storage = createMemoryBookmarkStorageAdapter();
+    const command = {
+      type: 'editFolder' as const,
+      operationId: 'a0000000-0000-4000-8000-000000000009',
+      folderId,
+      folderVersion: 1,
+      name: 'Unconfirmed',
+    };
+    await storage.writeUnconfirmedOperation?.(command, '2026-08-18T20:00:00.000Z');
+    const state = createBookmarkState({
+      remote: createMemoryBookmarkRemoteAdapter(snapshot()),
+      storage,
+      lifecycle: createMemoryBookmarkLifecycleAdapter(),
+    });
+
+    await state.initialize({ folderId });
+
+    expect(state.getState()).toMatchObject({
+      writeStatus: 'unknown',
+      unconfirmedOperations: [{ command }],
+    });
+    state.dispose();
+  });
 });

@@ -448,9 +448,11 @@ export const createBookmarkState = (adapters: {
       state.writeMessage = 'Still saving changes…';
       emit();
     }, 1_000);
+    let settledResult: BookmarkCommandResult | undefined;
 
     try {
       const result = await adapters.remote.executeCommand(command);
+      settledResult = result;
       lifecycle.clearTimeout(pendingTimer);
       state.snapshot = priorSnapshot;
       if (result.status === 'conflict') {
@@ -475,16 +477,22 @@ export const createBookmarkState = (adapters: {
         await adapters.storage.writeSnapshot(state.snapshot, { synchronizedAt });
         state.lastSuccessfulSyncAt = synchronizedAt;
       }
-      await adapters.storage.removeUnconfirmedOperation?.(command.operationId);
       state.unconfirmedOperations = state.unconfirmedOperations.filter(
         (item) => item.command.operationId !== command.operationId,
       );
+      await adapters.storage.removeUnconfirmedOperation?.(command.operationId);
       state.writeStatus = 'idle';
       state.writeMessage = null;
       emit();
       return result;
     } catch (error) {
       lifecycle.clearTimeout(pendingTimer);
+      if (settledResult?.status === 'acknowledged') {
+        state.writeStatus = 'failed';
+        state.writeMessage = 'The change was saved, but local retention failed.';
+        emit();
+        return settledResult;
+      }
       state.snapshot = priorSnapshot;
       if (error instanceof Error && error.name === 'UnknownBookmarkCommandError') {
         const recordedAt = new Date(lifecycle.now()).toISOString();
@@ -584,6 +592,10 @@ export const createBookmarkState = (adapters: {
       if (state.snapshot) settleSelection(preferredFolderId, routeFolderId !== undefined);
       else state.status = 'error';
       if (state.status === 'ready') await writeNavigation();
+      if (state.unconfirmedOperations.length) {
+        state.writeStatus = 'unknown';
+        state.writeMessage = 'A previous save result is unknown. Review and retry explicitly.';
+      }
       emit();
     },
     refresh,

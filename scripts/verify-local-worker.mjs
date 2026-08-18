@@ -155,11 +155,14 @@ try {
     await page.getByLabel('Note').fill('Created through the complete Worker.');
     await page.getByRole('button', { name: 'Save' }).click();
     await page.getByRole('dialog').waitFor({ state: 'detached' });
-    await page.getByRole('link', { name: /UI Bookmark/ }).waitFor();
-    await page
-      .locator('.bookmark-card-shell', { hasText: 'UI Bookmark' })
-      .locator('.bookmark-edit-button')
-      .click();
+    const createdBookmark = page.getByRole('link', { name: /UI Bookmark/ });
+    await createdBookmark.waitFor();
+    const editModeUrl = page.url();
+    await createdBookmark.click();
+    await page.getByRole('dialog').waitFor();
+    if (page.url() !== editModeUrl) {
+      throw new Error('Bookmark activation navigated while the Bookmarks Page was in Edit Mode.');
+    }
     await page.getByLabel('Title').fill('UI Bookmark Edited');
     await page.getByRole('button', { name: 'Save' }).click();
     try {

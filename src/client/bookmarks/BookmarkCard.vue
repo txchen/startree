@@ -8,16 +8,22 @@ const props = defineProps<{
   tags: readonly string[];
   editable: boolean;
 }>();
-defineEmits<{ edit: [] }>();
+const emit = defineEmits<{ edit: [] }>();
 
 const faviconFailed = ref(false);
 const destination = computed(() => new URL(props.bookmark.url));
 const fallbackMark = computed(() => destination.value.hostname.charAt(0).toUpperCase() || '↗');
+
+const activate = (event: MouseEvent) => {
+  if (!props.editable) return;
+  event.preventDefault();
+  emit('edit');
+};
 </script>
 
 <template>
   <article class="bookmark-card-shell">
-    <a class="bookmark-card" :href="bookmark.url">
+    <a class="bookmark-card" :href="bookmark.url" @click="activate">
       <span class="bookmark-favicon" aria-hidden="true">
         <img
           v-if="!faviconFailed"
