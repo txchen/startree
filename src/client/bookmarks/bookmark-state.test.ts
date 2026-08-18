@@ -722,4 +722,43 @@ describe('Bookmark state Module Interface', () => {
     });
     state.dispose();
   });
+
+  it('clears an unconfirmed operation when its explicit retry settles as a conflict', async () => {
+    const storage = createMemoryBookmarkStorageAdapter();
+    const command = {
+      type: 'editFolder' as const,
+      operationId: 'a0000000-0000-4000-8000-000000000010',
+      folderId,
+      folderVersion: 1,
+      name: 'Unconfirmed',
+    };
+    await storage.writeUnconfirmedOperation?.(command, '2026-08-18T20:00:00.000Z');
+    const remote = createMemoryBookmarkRemoteAdapter(snapshot());
+    remote.executeCommand = () =>
+      Promise.resolve({
+        status: 'conflict',
+        operationId: command.operationId,
+        code: 'stale_entity',
+        revision: 1,
+        folders: [snapshot().folders[1]!],
+        bookmarks: [],
+        tags: [],
+        sequences: [],
+      });
+    const state = createBookmarkState({
+      remote,
+      storage,
+      lifecycle: createMemoryBookmarkLifecycleAdapter(),
+    });
+    await state.initialize({ folderId });
+
+    await state.retryUnconfirmed(command.operationId);
+
+    expect(state.getState()).toMatchObject({
+      writeStatus: 'conflict',
+      unconfirmedOperations: [],
+    });
+    expect(await storage.readUnconfirmedOperations?.()).toEqual([]);
+    state.dispose();
+  });
 });

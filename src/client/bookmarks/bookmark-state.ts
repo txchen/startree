@@ -461,6 +461,10 @@ export const createBookmarkState = (adapters: {
         } else {
           await refresh();
         }
+        await adapters.storage.removeUnconfirmedOperation?.(command.operationId);
+        state.unconfirmedOperations = state.unconfirmedOperations.filter(
+          (item) => item.command.operationId !== command.operationId,
+        );
         state.writeStatus = 'conflict';
         state.writeMessage = 'The item changed elsewhere. Review the current authoritative data.';
         emit();
@@ -490,6 +494,13 @@ export const createBookmarkState = (adapters: {
       if (settledResult?.status === 'acknowledged') {
         state.writeStatus = 'failed';
         state.writeMessage = 'The change was saved, but local retention failed.';
+        emit();
+        return settledResult;
+      }
+      if (settledResult?.status === 'conflict') {
+        state.writeStatus = 'conflict';
+        state.writeMessage =
+          'The item changed elsewhere, but the settled result could not be retained locally.';
         emit();
         return settledResult;
       }
