@@ -3,6 +3,7 @@ import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
+import { fileURLToPath } from 'node:url';
 
 import { run } from './process.mjs';
 
@@ -23,18 +24,8 @@ run('npx', [
 ]);
 
 const worker = spawn(
-  'npx',
-  [
-    'wrangler',
-    'dev',
-    '--env',
-    'local',
-    '--local',
-    '--port',
-    port,
-    '--persist-to',
-    persistenceDirectory,
-  ],
+  fileURLToPath(new URL('../node_modules/.bin/wrangler', import.meta.url)),
+  ['dev', '--env', 'local', '--local', '--port', port, '--persist-to', persistenceDirectory],
   {
     cwd: new URL('..', import.meta.url),
     stdio: ['ignore', 'pipe', 'pipe'],
