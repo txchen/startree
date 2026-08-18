@@ -1233,11 +1233,18 @@ export const createBookmarkService = (
         restoredFolderIds.clear();
         rows.results.forEach((row) => restoredFolderIds.add(row.id));
       }
-      const restoredBookmarks = trash.bookmarks.filter((item) =>
+      const restoredBookmarkIds =
         restoreCommand.rootKind === 'bookmark'
-          ? item.id === root.id
-          : restoredFolderIds.has(item.folderId),
-      );
+          ? new Set([root.id])
+          : new Set(
+              (
+                await database
+                  .prepare('SELECT id FROM bookmarks WHERE trash_root_id = ?')
+                  .bind(root.id)
+                  .all<{ id: string }>()
+              ).results.map((bookmark) => bookmark.id),
+            );
+      const restoredBookmarks = trash.bookmarks.filter((item) => restoredBookmarkIds.has(item.id));
       const restoredFolders = trash.folders
         .filter((item) => restoredFolderIds.has(item.id))
         .map((item) =>
@@ -1761,7 +1768,10 @@ export const createBookmarkService = (
 
   const expireTrash = async (): Promise<number> => {
     const cutoff = new Date(now().getTime() - TRASH_RETENTION_MS).toISOString();
-    const [folderRoots, bookmarkRoots] = await Promise.all([
+    const [revisionRow, folderRoots, bookmarkRoots] = await Promise.all([
+      database
+        .prepare("SELECT revision FROM bookmark_domain_state WHERE name = 'bookmarks'")
+        .first<RevisionRow>(),
       database
         .prepare('SELECT id FROM bookmark_folders WHERE trashed_at IS NOT NULL AND trashed_at <= ?')
         .bind(cutoff)
@@ -1778,12 +1788,34 @@ export const createBookmarkService = (
       folderRoots.results.map((root) => root.id),
       bookmarkRoots.results.map((root) => root.id),
     );
-    await database.batch([
-      ...executeTrashDeletionStatements(database, plan),
-      database.prepare(
-        "UPDATE bookmark_domain_state SET revision = revision + 1 WHERE name = 'bookmarks'",
-      ),
-    ]);
+    const assertionId = randomUUID();
+    await beforeCommandBatch();
+    try {
+      await database.batch([
+        database
+          .prepare(
+            `INSERT INTO bookmark_command_assertions (operation_id, valid)
+             SELECT ?, CASE WHEN
+               (SELECT revision FROM bookmark_domain_state WHERE name = 'bookmarks') = ?
+               AND ((SELECT COUNT(*) FROM bookmark_folders
+                      WHERE trashed_at IS NOT NULL AND trashed_at <= ?)
+                  + (SELECT COUNT(*) FROM bookmarks
+                      WHERE trashed_at IS NOT NULL AND trashed_at <= ?)) = ?
+             THEN 1 ELSE 0 END`,
+          )
+          .bind(assertionId, revisionRow?.revision ?? 0, cutoff, cutoff, rootCount),
+        ...executeTrashDeletionStatements(database, plan),
+        database.prepare(
+          "UPDATE bookmark_domain_state SET revision = revision + 1 WHERE name = 'bookmarks'",
+        ),
+        database
+          .prepare('DELETE FROM bookmark_command_assertions WHERE operation_id = ?')
+          .bind(assertionId),
+      ]);
+    } catch (error) {
+      if (isAssertionFailure(error)) return 0;
+      throw error;
+    }
     return rootCount;
   };
 

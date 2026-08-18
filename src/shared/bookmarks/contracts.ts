@@ -236,21 +236,23 @@ export const trashFolderCommandSchema = v.object({
   expectedFolderSequenceVersion: entityVersionSchema,
 });
 
-export const restoreTrashCommandSchema = v.object({
-  ...commandBase,
-  type: v.literal('restoreTrash'),
+const trashRootReferenceSchema = {
   rootKind: v.picklist(['folder', 'bookmark']),
   rootId: identifierSchema,
   rootVersion: entityVersionSchema,
+};
+
+export const restoreTrashCommandSchema = v.object({
+  ...commandBase,
+  type: v.literal('restoreTrash'),
+  ...trashRootReferenceSchema,
   expectedDestinationSequenceVersion: entityVersionSchema,
 });
 
 export const purgeTrashCommandSchema = v.object({
   ...commandBase,
   type: v.literal('purgeTrash'),
-  rootKind: v.picklist(['folder', 'bookmark']),
-  rootId: identifierSchema,
-  rootVersion: entityVersionSchema,
+  ...trashRootReferenceSchema,
 });
 
 export const emptyTrashCommandSchema = v.object({

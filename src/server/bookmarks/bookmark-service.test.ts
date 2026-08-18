@@ -1143,4 +1143,98 @@ describe('Bookmark Service Interface', () => {
       }),
     ).toMatchObject({ status: 'acknowledged' });
   });
+
+  it('does not merge an independently trashed Bookmark when restoring its former Folder', async () => {
+    const folderId = '8c000000-0000-4000-8000-000000000001';
+    const bookmarkId = '8d000000-0000-4000-8000-000000000001';
+    await database.batch([
+      database
+        .prepare(
+          `INSERT INTO bookmark_folders (id, name, parent_id, rank, created_at, modified_at, version) VALUES (?, 'Parent', ?, 'a', ?, ?, 1)`,
+        )
+        .bind(folderId, SYSTEM_ROOT_FOLDER_ID, now, now),
+      database
+        .prepare(
+          "INSERT INTO bookmark_sequences (folder_id, kind, version) VALUES (?, 'folders', 1)",
+        )
+        .bind(folderId),
+      database
+        .prepare(
+          "INSERT INTO bookmark_sequences (folder_id, kind, version) VALUES (?, 'bookmarks', 1)",
+        )
+        .bind(folderId),
+      database
+        .prepare(
+          `INSERT INTO bookmarks (id, folder_id, url, title, note, rank, created_at, modified_at, version) VALUES (?, ?, 'https://example.com', 'Separate root', '', 'a', ?, ?, 1)`,
+        )
+        .bind(bookmarkId, folderId, now, now),
+    ]);
+    const service = createBookmarkService(database, { now: () => new Date(now) });
+    await service.executeCommand({
+      type: 'trashBookmark',
+      operationId: 'b8000000-0000-4000-8000-000000000001',
+      bookmarkId,
+      bookmarkVersion: 1,
+      folderId,
+      expectedBookmarkSequenceVersion: 1,
+    });
+    await service.executeCommand({
+      type: 'trashFolder',
+      operationId: 'b8000000-0000-4000-8000-000000000002',
+      folderId,
+      folderVersion: 1,
+      parentId: SYSTEM_ROOT_FOLDER_ID,
+      expectedFolderSequenceVersion: 1,
+    });
+    const restored = await service.executeCommand({
+      type: 'restoreTrash',
+      operationId: 'b8000000-0000-4000-8000-000000000003',
+      rootKind: 'folder',
+      rootId: folderId,
+      rootVersion: 2,
+      expectedDestinationSequenceVersion: 2,
+    });
+    expect(restored).toMatchObject({ status: 'acknowledged', bookmarks: [] });
+    expect((await service.getSnapshot()).bookmarks).toEqual([]);
+    expect((await service.getTrash()).roots.map((root) => root.id)).toEqual([bookmarkId]);
+  });
+
+  it('leaves a concurrently restored root intact when expiration loses its precondition', async () => {
+    const bookmarkId = '8e000000-0000-4000-8000-000000000001';
+    await database
+      .prepare(
+        `INSERT INTO bookmarks (id, folder_id, url, title, note, rank, created_at, modified_at, version) VALUES (?, ?, 'https://example.com', 'Race', '', 'a', ?, ?, 1)`,
+      )
+      .bind(bookmarkId, SYSTEM_ROOT_FOLDER_ID, now, now)
+      .run();
+    const setup = createBookmarkService(database, { now: () => new Date(now) });
+    await setup.executeCommand({
+      type: 'trashBookmark',
+      operationId: 'b9000000-0000-4000-8000-000000000001',
+      bookmarkId,
+      bookmarkVersion: 1,
+      folderId: SYSTEM_ROOT_FOLDER_ID,
+      expectedBookmarkSequenceVersion: 1,
+    });
+    let raced = false;
+    const expiring = createBookmarkService(database, {
+      now: () => new Date('2026-09-18T12:00:00.001Z'),
+      beforeCommandBatch: async () => {
+        if (raced) return;
+        raced = true;
+        await setup.executeCommand({
+          type: 'restoreTrash',
+          operationId: 'b9000000-0000-4000-8000-000000000002',
+          rootKind: 'bookmark',
+          rootId: bookmarkId,
+          rootVersion: 2,
+          expectedDestinationSequenceVersion: 2,
+        });
+      },
+    });
+    await expect(expiring.expireTrash()).resolves.toBe(0);
+    expect((await setup.getSnapshot()).bookmarks).toEqual([
+      expect.objectContaining({ id: bookmarkId, version: 3 }),
+    ]);
+  });
 });

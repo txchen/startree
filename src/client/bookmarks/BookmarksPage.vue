@@ -41,8 +41,7 @@ const moveEditor = ref<{ kind: 'folder' | 'bookmark'; id: string } | null>(null)
 const moveDestinationId = ref(SYSTEM_ROOT_FOLDER_ID);
 const moveBeforeId = ref('');
 const trashOpen = ref(false);
-const lastTrashedRoot = ref<BookmarkTrashRoot | null>(null);
-const lastTrashedRootVersion = ref<number | null>(null);
+const undoableTrash = ref<{ root: BookmarkTrashRoot; version: number } | null>(null);
 const stateModule = createBookmarkState({
   remote: createFetchBookmarkAdapter(),
   storage: createIndexedDbBookmarkAdapter(),
@@ -385,6 +384,14 @@ const closeTrash = () => {
   trashOpen.value = false;
 };
 
+const rememberUndoableTrash = (root: BookmarkTrashRoot, version: number) => {
+  undoableTrash.value = { root, version };
+};
+
+const clearUndoableTrash = (rootId?: string) => {
+  if (!rootId || undoableTrash.value?.root.id === rootId) undoableTrash.value = null;
+};
+
 const trashBookmark = async (bookmark: Bookmark) => {
   const sequence = sequenceFor(bookmark.folderId);
   if (!sequence) return;
@@ -397,14 +404,16 @@ const trashBookmark = async (bookmark: Bookmark) => {
     expectedBookmarkSequenceVersion: sequence.bookmarkVersion,
   });
   if (result?.status === 'acknowledged') {
-    lastTrashedRoot.value = {
-      kind: 'bookmark',
-      id: bookmark.id,
-      deletedAt: new Date().toISOString(),
-      originalParentId: bookmark.folderId,
-      originalRank: bookmark.rank,
-    };
-    lastTrashedRootVersion.value = bookmark.version + 1;
+    rememberUndoableTrash(
+      {
+        kind: 'bookmark',
+        id: bookmark.id,
+        deletedAt: new Date().toISOString(),
+        originalParentId: bookmark.folderId,
+        originalRank: bookmark.rank,
+      },
+      bookmark.version + 1,
+    );
   }
 };
 
@@ -447,30 +456,53 @@ const trashFolder = async (folder: BookmarkFolder) => {
     expectedFolderSequenceVersion: sequence.folderVersion,
   });
   if (result?.status === 'acknowledged') {
-    lastTrashedRoot.value = {
-      kind: 'folder',
-      id: folder.id,
-      deletedAt: new Date().toISOString(),
-      originalParentId: folder.parentId,
-      originalRank: folder.rank,
-    };
-    lastTrashedRootVersion.value = folder.version + 1;
+    rememberUndoableTrash(
+      {
+        kind: 'folder',
+        id: folder.id,
+        deletedAt: new Date().toISOString(),
+        originalParentId: folder.parentId,
+        originalRank: folder.rank,
+      },
+      folder.version + 1,
+    );
   }
 };
 
-const trashRecordVersion = (root: BookmarkTrashRoot) =>
-  root.kind === 'folder'
-    ? state.value.trash?.folders.find((folder) => folder.id === root.id)?.version
-    : state.value.trash?.bookmarks.find((bookmark) => bookmark.id === root.id)?.version;
+const trashRootDetails = (root: BookmarkTrashRoot) => {
+  if (root.kind === 'folder') {
+    const record = state.value.trash?.folders.find((folder) => folder.id === root.id);
+    return {
+      version: record?.version,
+      name: record?.name,
+      typeLabel: 'Folder tree',
+      destinationSequenceVersion: (sequence: NonNullable<ReturnType<typeof sequenceFor>>) =>
+        sequence.folderVersion,
+    };
+  }
+  const record = state.value.trash?.bookmarks.find((bookmark) => bookmark.id === root.id);
+  return {
+    version: record?.version,
+    name: record?.title,
+    typeLabel: 'Bookmark',
+    destinationSequenceVersion: (sequence: NonNullable<ReturnType<typeof sequenceFor>>) =>
+      sequence.bookmarkVersion,
+  };
+};
+
+const trashEntries = computed(() =>
+  (state.value.trash?.roots ?? []).map((root) => ({ root, ...trashRootDetails(root) })),
+);
 
 const restoreTrashRoot = async (root: BookmarkTrashRoot) => {
   const activeParent = state.value.folders.some((folder) => folder.id === root.originalParentId)
     ? root.originalParentId
     : SYSTEM_ROOT_FOLDER_ID;
   const sequence = sequenceFor(activeParent);
+  const details = trashRootDetails(root);
   const version =
-    trashRecordVersion(root) ??
-    (lastTrashedRoot.value?.id === root.id ? lastTrashedRootVersion.value : null);
+    details.version ??
+    (undoableTrash.value?.root.id === root.id ? undoableTrash.value.version : null);
   if (!sequence || !version) return;
   const result = await stateModule.executeCommand({
     type: 'restoreTrash',
@@ -478,17 +510,13 @@ const restoreTrashRoot = async (root: BookmarkTrashRoot) => {
     rootKind: root.kind,
     rootId: root.id,
     rootVersion: version,
-    expectedDestinationSequenceVersion:
-      root.kind === 'folder' ? sequence.folderVersion : sequence.bookmarkVersion,
+    expectedDestinationSequenceVersion: details.destinationSequenceVersion(sequence),
   });
-  if (result?.status === 'acknowledged' && lastTrashedRoot.value?.id === root.id) {
-    lastTrashedRoot.value = null;
-    lastTrashedRootVersion.value = null;
-  }
+  if (result?.status === 'acknowledged') clearUndoableTrash(root.id);
 };
 
 const purgeTrashRoot = async (root: BookmarkTrashRoot) => {
-  const version = trashRecordVersion(root);
+  const version = trashRootDetails(root).version;
   if (
     !version ||
     !window.confirm(
@@ -503,10 +531,7 @@ const purgeTrashRoot = async (root: BookmarkTrashRoot) => {
     rootId: root.id,
     rootVersion: version,
   });
-  if (result?.status === 'acknowledged' && lastTrashedRoot.value?.id === root.id) {
-    lastTrashedRoot.value = null;
-    lastTrashedRootVersion.value = null;
-  }
+  if (result?.status === 'acknowledged') clearUndoableTrash(root.id);
 };
 
 const emptyTrash = async () => {
@@ -522,10 +547,7 @@ const emptyTrash = async () => {
     operationId: crypto.randomUUID(),
     expectedRevision: state.value.trash.revision,
   });
-  if (result?.status === 'acknowledged') {
-    lastTrashedRoot.value = null;
-    lastTrashedRootVersion.value = null;
-  }
+  if (result?.status === 'acknowledged') clearUndoableTrash();
 };
 
 onMounted(async () => {
@@ -593,9 +615,9 @@ onUnmounted(() => {
 
     <div class="bookmarks-workspace">
       <p v-if="state.notice" class="navigation-notice" role="status">{{ state.notice }}</p>
-      <div v-if="lastTrashedRoot" class="undo-notice" role="status">
+      <div v-if="undoableTrash" class="undo-notice" role="status">
         <span>Moved to Trash.</span>
-        <button type="button" @click="restoreTrashRoot(lastTrashedRoot)">Undo</button>
+        <button type="button" @click="restoreTrashRoot(undoableTrash.root)">Undo</button>
       </div>
 
       <div
@@ -736,21 +758,16 @@ onUnmounted(() => {
           <p>Deleted Bookmarks and Folder trees will appear here for 30 days.</p>
         </div>
         <ul v-else class="trash-list">
-          <li v-for="root in state.trash.roots" :key="`${root.kind}:${root.id}`">
+          <li v-for="entry in trashEntries" :key="`${entry.root.kind}:${entry.root.id}`">
             <div>
-              <strong>{{
-                root.kind === 'folder'
-                  ? state.trash.folders.find((item) => item.id === root.id)?.name
-                  : state.trash.bookmarks.find((item) => item.id === root.id)?.title
-              }}</strong>
+              <strong>{{ entry.name }}</strong>
               <small
-                >{{ root.kind === 'folder' ? 'Folder tree' : 'Bookmark' }} · Deleted
-                {{ formatSyncTime(root.deletedAt) }}</small
+                >{{ entry.typeLabel }} · Deleted {{ formatSyncTime(entry.root.deletedAt) }}</small
               >
             </div>
             <div v-if="editingAvailable">
-              <button type="button" @click="restoreTrashRoot(root)">Restore</button
-              ><button type="button" @click="purgeTrashRoot(root)">Delete permanently</button>
+              <button type="button" @click="restoreTrashRoot(entry.root)">Restore</button
+              ><button type="button" @click="purgeTrashRoot(entry.root)">Delete permanently</button>
             </div>
           </li>
         </ul>
