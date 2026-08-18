@@ -10,6 +10,7 @@ import {
   bookmarkTitleFor,
   normalizeBookmarkTags,
   SYSTEM_ROOT_FOLDER_ID,
+  visitBookmarkCommand,
 } from '../../shared/bookmarks/contracts';
 import type { BookmarkSearchAdapter, BookmarkSearchResult } from './bookmark-search';
 
@@ -331,64 +332,68 @@ export const createBookmarkState = (adapters: {
   const applyOptimisticCommand = (command: BookmarkCommand) => {
     if (!state.snapshot) return;
     const timestamp = new Date(lifecycle.now()).toISOString();
-    if (command.type === 'createFolder') {
-      state.snapshot.folders.push({
-        id: command.operationId,
-        name: command.name,
-        parentId: command.parentId,
-        rank: 'zzzz',
-        createdAt: timestamp,
-        modifiedAt: timestamp,
-        version: 1,
-      });
-      return;
-    }
-    if (command.type === 'editFolder') {
-      state.snapshot.folders = state.snapshot.folders.map((folder) =>
-        folder.id === command.folderId
-          ? { ...folder, name: command.name, modifiedAt: timestamp }
-          : folder,
-      );
-      return;
-    }
-    if (command.type === 'createBookmark') {
-      state.snapshot.bookmarks.push({
-        id: command.operationId,
-        folderId: command.folderId,
-        url: command.url,
-        title: bookmarkTitleFor(command.url, command.title),
-        note: command.note,
-        rank: 'zzzz',
-        createdAt: timestamp,
-        modifiedAt: timestamp,
-        version: 1,
-      });
-      state.snapshot.tags.push(
-        ...normalizeBookmarkTags(command.tags).map((value) => ({
-          bookmarkId: command.operationId,
-          value,
-        })),
-      );
-      return;
-    }
-    state.snapshot.bookmarks = state.snapshot.bookmarks.map((bookmark) =>
-      bookmark.id === command.bookmarkId
-        ? {
-            ...bookmark,
-            url: command.url,
-            title: command.title,
-            note: command.note,
-            modifiedAt: timestamp,
-          }
-        : bookmark,
-    );
-    state.snapshot.tags = [
-      ...state.snapshot.tags.filter((tag) => tag.bookmarkId !== command.bookmarkId),
-      ...normalizeBookmarkTags(command.tags).map((value) => ({
-        bookmarkId: command.bookmarkId,
-        value,
-      })),
-    ];
+    visitBookmarkCommand(command, {
+      createFolder(createCommand) {
+        state.snapshot?.folders.push({
+          id: createCommand.operationId,
+          name: createCommand.name,
+          parentId: createCommand.parentId,
+          rank: 'zzzz',
+          createdAt: timestamp,
+          modifiedAt: timestamp,
+          version: 1,
+        });
+      },
+      editFolder(editCommand) {
+        if (!state.snapshot) return;
+        state.snapshot.folders = state.snapshot.folders.map((folder) =>
+          folder.id === editCommand.folderId
+            ? { ...folder, name: editCommand.name, modifiedAt: timestamp }
+            : folder,
+        );
+      },
+      createBookmark(createCommand) {
+        if (!state.snapshot) return;
+        state.snapshot.bookmarks.push({
+          id: createCommand.operationId,
+          folderId: createCommand.folderId,
+          url: createCommand.url,
+          title: bookmarkTitleFor(createCommand.url, createCommand.title),
+          note: createCommand.note,
+          rank: 'zzzz',
+          createdAt: timestamp,
+          modifiedAt: timestamp,
+          version: 1,
+        });
+        state.snapshot.tags.push(
+          ...normalizeBookmarkTags(createCommand.tags).map((value) => ({
+            bookmarkId: createCommand.operationId,
+            value,
+          })),
+        );
+      },
+      editBookmark(editCommand) {
+        if (!state.snapshot) return;
+        state.snapshot.bookmarks = state.snapshot.bookmarks.map((bookmark) =>
+          bookmark.id === editCommand.bookmarkId
+            ? {
+                ...bookmark,
+                url: editCommand.url,
+                title: editCommand.title,
+                note: editCommand.note,
+                modifiedAt: timestamp,
+              }
+            : bookmark,
+        );
+        state.snapshot.tags = [
+          ...state.snapshot.tags.filter((tag) => tag.bookmarkId !== editCommand.bookmarkId),
+          ...normalizeBookmarkTags(editCommand.tags).map((value) => ({
+            bookmarkId: editCommand.bookmarkId,
+            value,
+          })),
+        ];
+      },
+    });
   };
 
   const mergeCommandResult = (

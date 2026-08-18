@@ -7,6 +7,7 @@ import {
   bookmarkCommandSchema,
   bookmarkSnapshotSchema,
   normalizeBookmarkTags,
+  visitBookmarkCommand,
   type Bookmark,
   type BookmarkCommand,
   type BookmarkCommandResult,
@@ -30,6 +31,7 @@ type IdempotencyRow = { resultJson: string };
 type BookmarkServiceOptions = {
   now?: () => Date;
   randomUUID?: () => string;
+  beforeCommandBatch?: () => Promise<void>;
 };
 
 const rowsAt = (results: D1Result<SnapshotRow>[], index: number): SnapshotRow[] =>
@@ -164,6 +166,7 @@ export const createBookmarkService = (
 ): BookmarkService => {
   const now = options.now ?? (() => new Date());
   const randomUUID = options.randomUUID ?? (() => crypto.randomUUID());
+  const beforeCommandBatch = options.beforeCommandBatch ?? (() => Promise.resolve());
 
   const conflict = async (
     command: BookmarkCommand,
@@ -209,6 +212,68 @@ export const createBookmarkService = (
       .bind(command.operationId),
   ];
 
+  const classifyAssertionConflict = (command: BookmarkCommand) =>
+    visitBookmarkCommand(command, {
+      async createFolder(createCommand) {
+        const [parent, duplicate] = await Promise.all([
+          folderStatement(database, createCommand.parentId).first<FolderRow>(),
+          database
+            .prepare(
+              `SELECT id FROM bookmark_folders
+                WHERE parent_id = ? AND name = ?
+                  AND trashed_at IS NULL AND trash_root_id IS NULL`,
+            )
+            .bind(createCommand.parentId, createCommand.name)
+            .first<{ id: string }>(),
+        ]);
+        if (!parent) return conflict(createCommand, 'missing_entity');
+        if (duplicate) {
+          return conflict(createCommand, 'name_conflict', { folderId: duplicate.id });
+        }
+        return conflict(createCommand, 'stale_sequence', {
+          sequenceFolderId: createCommand.parentId,
+        });
+      },
+      async editFolder(editCommand) {
+        const folder = await folderStatement(database, editCommand.folderId).first<FolderRow>();
+        if (!folder) return conflict(editCommand, 'missing_entity');
+        const duplicate = await database
+          .prepare(
+            `SELECT id FROM bookmark_folders
+              WHERE parent_id IS ? AND name = ? AND id != ?
+                AND trashed_at IS NULL AND trash_root_id IS NULL`,
+          )
+          .bind(folder.parentId, editCommand.name, editCommand.folderId)
+          .first<{ id: string }>();
+        if (duplicate) {
+          return conflict(editCommand, 'name_conflict', { folderId: duplicate.id });
+        }
+        return conflict(editCommand, 'stale_entity', { folderId: editCommand.folderId });
+      },
+      async createBookmark(createCommand) {
+        const folder = await folderStatement(database, createCommand.folderId).first<FolderRow>();
+        return folder
+          ? conflict(createCommand, 'stale_sequence', {
+              sequenceFolderId: createCommand.folderId,
+            })
+          : conflict(createCommand, 'missing_entity');
+      },
+      async editBookmark(editCommand) {
+        const bookmark = await bookmarkStatement(
+          database,
+          editCommand.bookmarkId,
+        ).first<BookmarkRow>();
+        return bookmark
+          ? conflict(editCommand, 'stale_entity', { bookmarkId: editCommand.bookmarkId })
+          : conflict(editCommand, 'missing_entity');
+      },
+    });
+
+  const isAssertionFailure = (error: unknown): boolean => {
+    const message = error instanceof Error ? error.message : String(error);
+    return message.includes('CHECK constraint failed: valid = 1');
+  };
+
   const executeCommand = async (input: BookmarkCommand): Promise<BookmarkCommandResult> => {
     const command = v.parse(bookmarkCommandSchema, input);
     const settled = await database
@@ -228,52 +293,55 @@ export const createBookmarkService = (
     const timestamp = now().toISOString();
     const expiresAt = resultExpiry(new Date(timestamp));
 
-    if (command.type === 'createFolder') {
-      const [parent, sequence, duplicate] = await Promise.all([
-        folderStatement(database, command.parentId).first<FolderRow>(),
-        sequenceStatement(database, command.parentId).first<SequenceRow>(),
-        database
-          .prepare(
-            `SELECT id FROM bookmark_folders
+    try {
+      return await visitBookmarkCommand(command, {
+        createFolder: async (command) => {
+          const [parent, sequence, duplicate] = await Promise.all([
+            folderStatement(database, command.parentId).first<FolderRow>(),
+            sequenceStatement(database, command.parentId).first<SequenceRow>(),
+            database
+              .prepare(
+                `SELECT id FROM bookmark_folders
               WHERE parent_id = ? AND name = ?
                 AND trashed_at IS NULL AND trash_root_id IS NULL`,
-          )
-          .bind(command.parentId, command.name)
-          .first<{ id: string }>(),
-      ]);
-      if (!parent || !sequence) return conflict(command, 'missing_entity');
-      if (sequence.folderVersion !== command.expectedFolderSequenceVersion) {
-        return conflict(command, 'stale_sequence', { sequenceFolderId: command.parentId });
-      }
-      if (duplicate) return conflict(command, 'name_conflict', { folderId: duplicate.id });
+              )
+              .bind(command.parentId, command.name)
+              .first<{ id: string }>(),
+          ]);
+          if (!parent || !sequence) return conflict(command, 'missing_entity');
+          if (sequence.folderVersion !== command.expectedFolderSequenceVersion) {
+            return conflict(command, 'stale_sequence', { sequenceFolderId: command.parentId });
+          }
+          if (duplicate) return conflict(command, 'name_conflict', { folderId: duplicate.id });
 
-      const folder: BookmarkFolder = {
-        id: randomUUID(),
-        name: command.name,
-        parentId: command.parentId,
-        rank: await nextRank(database, 'bookmark_folders', 'parent_id', command.parentId),
-        createdAt: timestamp,
-        modifiedAt: timestamp,
-        version: 1,
-      };
-      const updatedSequence: BookmarkSequence = {
-        folderId: command.parentId,
-        folderVersion: sequence.folderVersion + 1,
-        bookmarkVersion: sequence.bookmarkVersion,
-      };
-      const result = v.parse(bookmarkCommandResultSchema, {
-        status: 'acknowledged',
-        operationId: command.operationId,
-        revision: revision + 1,
-        folders: [folder],
-        bookmarks: [],
-        tags: [],
-        sequences: [updatedSequence],
-      });
-      await database.batch([
-        database
-          .prepare(
-            `INSERT INTO bookmark_command_assertions (operation_id, valid)
+          const folder: BookmarkFolder = {
+            id: randomUUID(),
+            name: command.name,
+            parentId: command.parentId,
+            rank: await nextRank(database, 'bookmark_folders', 'parent_id', command.parentId),
+            createdAt: timestamp,
+            modifiedAt: timestamp,
+            version: 1,
+          };
+          const updatedSequence: BookmarkSequence = {
+            folderId: command.parentId,
+            folderVersion: sequence.folderVersion + 1,
+            bookmarkVersion: sequence.bookmarkVersion,
+          };
+          const result = v.parse(bookmarkCommandResultSchema, {
+            status: 'acknowledged',
+            operationId: command.operationId,
+            revision: revision + 1,
+            folders: [folder],
+            bookmarks: [],
+            tags: [],
+            sequences: [updatedSequence],
+          });
+          await beforeCommandBatch();
+          await database.batch([
+            database
+              .prepare(
+                `INSERT INTO bookmark_command_assertions (operation_id, valid)
              SELECT ?, CASE WHEN
                (SELECT revision FROM bookmark_domain_state WHERE name = 'bookmarks') = ?
                AND (SELECT version FROM bookmark_sequences WHERE folder_id = ? AND kind = 'folders') = ?
@@ -283,83 +351,84 @@ export const createBookmarkService = (
                     AND trashed_at IS NULL AND trash_root_id IS NULL
                )
              THEN 1 ELSE 0 END`,
-          )
-          .bind(
-            command.operationId,
-            revision,
-            command.parentId,
-            command.expectedFolderSequenceVersion,
-            command.parentId,
-            command.name,
-          ),
-        database
-          .prepare(
-            `INSERT INTO bookmark_folders
+              )
+              .bind(
+                command.operationId,
+                revision,
+                command.parentId,
+                command.expectedFolderSequenceVersion,
+                command.parentId,
+                command.name,
+              ),
+            database
+              .prepare(
+                `INSERT INTO bookmark_folders
               (id, name, parent_id, rank, created_at, modified_at, version)
              VALUES (?, ?, ?, ?, ?, ?, 1)`,
-          )
-          .bind(
-            folder.id,
-            folder.name,
-            folder.parentId,
-            folder.rank,
-            folder.createdAt,
-            folder.modifiedAt,
-          ),
-        database
-          .prepare('INSERT INTO bookmark_sequences (folder_id, kind, version) VALUES (?, ?, 1)')
-          .bind(folder.id, 'folders'),
-        database
-          .prepare('INSERT INTO bookmark_sequences (folder_id, kind, version) VALUES (?, ?, 1)')
-          .bind(folder.id, 'bookmarks'),
-        database
-          .prepare(
-            "UPDATE bookmark_sequences SET version = version + 1 WHERE folder_id = ? AND kind = 'folders'",
-          )
-          .bind(command.parentId),
-        database.prepare(
-          "UPDATE bookmark_domain_state SET revision = revision + 1 WHERE name = 'bookmarks'",
-        ),
-        ...storeResultStatements(command, result, timestamp, expiresAt),
-      ]);
-      return result;
-    }
+              )
+              .bind(
+                folder.id,
+                folder.name,
+                folder.parentId,
+                folder.rank,
+                folder.createdAt,
+                folder.modifiedAt,
+              ),
+            database
+              .prepare('INSERT INTO bookmark_sequences (folder_id, kind, version) VALUES (?, ?, 1)')
+              .bind(folder.id, 'folders'),
+            database
+              .prepare('INSERT INTO bookmark_sequences (folder_id, kind, version) VALUES (?, ?, 1)')
+              .bind(folder.id, 'bookmarks'),
+            database
+              .prepare(
+                "UPDATE bookmark_sequences SET version = version + 1 WHERE folder_id = ? AND kind = 'folders'",
+              )
+              .bind(command.parentId),
+            database.prepare(
+              "UPDATE bookmark_domain_state SET revision = revision + 1 WHERE name = 'bookmarks'",
+            ),
+            ...storeResultStatements(command, result, timestamp, expiresAt),
+          ]);
+          return result;
+        },
 
-    if (command.type === 'editFolder') {
-      const folder = await folderStatement(database, command.folderId).first<FolderRow>();
-      if (!folder) return conflict(command, 'missing_entity');
-      if (folder.version !== command.folderVersion) {
-        return conflict(command, 'stale_entity', { folderId: command.folderId });
-      }
-      const duplicate = await database
-        .prepare(
-          `SELECT id FROM bookmark_folders
+        editFolder: async (command) => {
+          const folder = await folderStatement(database, command.folderId).first<FolderRow>();
+          if (!folder) return conflict(command, 'missing_entity');
+          if (folder.version !== command.folderVersion) {
+            return conflict(command, 'stale_entity', { folderId: command.folderId });
+          }
+          const duplicate = await database
+            .prepare(
+              `SELECT id FROM bookmark_folders
             WHERE parent_id = ? AND name = ? AND id != ?
               AND trashed_at IS NULL AND trash_root_id IS NULL`,
-        )
-        .bind(folder.parentId, command.name, command.folderId)
-        .first<{ id: string }>();
-      if (duplicate) return conflict(command, 'name_conflict', { folderId: duplicate.id });
+            )
+            .bind(folder.parentId, command.name, command.folderId)
+            .first<{ id: string }>();
+          if (duplicate) return conflict(command, 'name_conflict', { folderId: duplicate.id });
 
-      const updated: BookmarkFolder = {
-        ...folder,
-        name: command.name,
-        modifiedAt: timestamp,
-        version: folder.version + 1,
-      };
-      const result = v.parse(bookmarkCommandResultSchema, {
-        status: 'acknowledged',
-        operationId: command.operationId,
-        revision: revision + 1,
-        folders: [updated],
-        bookmarks: [],
-        tags: [],
-        sequences: [],
-      });
-      await database.batch([
-        database
-          .prepare(
-            `INSERT INTO bookmark_command_assertions (operation_id, valid)
+          const updated: BookmarkFolder = {
+            ...folder,
+            name: command.name,
+            modifiedAt: timestamp,
+            version: folder.version + 1,
+          };
+          const result = v.parse(bookmarkCommandResultSchema, {
+            status: 'acknowledged',
+            operationId: command.operationId,
+            revision: revision + 1,
+            folders: [updated],
+            bookmarks: [],
+            tags: [],
+            sequences: [],
+          });
+          await beforeCommandBatch();
+          await database.batch([
+            database
+              .prepare(
+                `INSERT INTO bookmark_command_assertions (operation_id, valid)
              SELECT ?, CASE WHEN
                (SELECT revision FROM bookmark_domain_state WHERE name = 'bookmarks') = ?
                AND (SELECT version FROM bookmark_folders WHERE id = ?) = ?
@@ -369,169 +438,194 @@ export const createBookmarkService = (
                     AND trashed_at IS NULL AND trash_root_id IS NULL
                )
              THEN 1 ELSE 0 END`,
-          )
-          .bind(
-            command.operationId,
-            revision,
-            command.folderId,
-            command.folderVersion,
-            folder.parentId,
-            command.name,
-            command.folderId,
-          ),
-        database
-          .prepare(
-            'UPDATE bookmark_folders SET name = ?, modified_at = ?, version = version + 1 WHERE id = ?',
-          )
-          .bind(command.name, timestamp, command.folderId),
-        database.prepare(
-          "UPDATE bookmark_domain_state SET revision = revision + 1 WHERE name = 'bookmarks'",
-        ),
-        ...storeResultStatements(command, result, timestamp, expiresAt),
-      ]);
-      return result;
-    }
+              )
+              .bind(
+                command.operationId,
+                revision,
+                command.folderId,
+                command.folderVersion,
+                folder.parentId,
+                command.name,
+                command.folderId,
+              ),
+            database
+              .prepare(
+                'UPDATE bookmark_folders SET name = ?, modified_at = ?, version = version + 1 WHERE id = ?',
+              )
+              .bind(command.name, timestamp, command.folderId),
+            database.prepare(
+              "UPDATE bookmark_domain_state SET revision = revision + 1 WHERE name = 'bookmarks'",
+            ),
+            ...storeResultStatements(command, result, timestamp, expiresAt),
+          ]);
+          return result;
+        },
 
-    if (command.type === 'createBookmark') {
-      const [folder, sequence] = await Promise.all([
-        folderStatement(database, command.folderId).first<FolderRow>(),
-        sequenceStatement(database, command.folderId).first<SequenceRow>(),
-      ]);
-      if (!folder || !sequence) return conflict(command, 'missing_entity');
-      if (sequence.bookmarkVersion !== command.expectedBookmarkSequenceVersion) {
-        return conflict(command, 'stale_sequence', { sequenceFolderId: command.folderId });
-      }
-      const tags = normalizeBookmarkTags(command.tags);
-      const bookmark: Bookmark = {
-        id: randomUUID(),
-        folderId: command.folderId,
-        url: command.url,
-        title: bookmarkTitleFor(command.url, command.title),
-        note: command.note,
-        rank: await nextRank(database, 'bookmarks', 'folder_id', command.folderId),
-        createdAt: timestamp,
-        modifiedAt: timestamp,
-        version: 1,
-      };
-      const updatedSequence: BookmarkSequence = {
-        folderId: command.folderId,
-        folderVersion: sequence.folderVersion,
-        bookmarkVersion: sequence.bookmarkVersion + 1,
-      };
-      const result = v.parse(bookmarkCommandResultSchema, {
-        status: 'acknowledged',
-        operationId: command.operationId,
-        revision: revision + 1,
-        folders: [],
-        bookmarks: [bookmark],
-        tags: tags.map((value) => ({ bookmarkId: bookmark.id, value })),
-        sequences: [updatedSequence],
-      });
-      await database.batch([
-        database
-          .prepare(
-            `INSERT INTO bookmark_command_assertions (operation_id, valid)
+        createBookmark: async (command) => {
+          const [folder, sequence] = await Promise.all([
+            folderStatement(database, command.folderId).first<FolderRow>(),
+            sequenceStatement(database, command.folderId).first<SequenceRow>(),
+          ]);
+          if (!folder || !sequence) return conflict(command, 'missing_entity');
+          if (sequence.bookmarkVersion !== command.expectedBookmarkSequenceVersion) {
+            return conflict(command, 'stale_sequence', { sequenceFolderId: command.folderId });
+          }
+          const tags = normalizeBookmarkTags(command.tags);
+          const bookmark: Bookmark = {
+            id: randomUUID(),
+            folderId: command.folderId,
+            url: command.url,
+            title: bookmarkTitleFor(command.url, command.title),
+            note: command.note,
+            rank: await nextRank(database, 'bookmarks', 'folder_id', command.folderId),
+            createdAt: timestamp,
+            modifiedAt: timestamp,
+            version: 1,
+          };
+          const updatedSequence: BookmarkSequence = {
+            folderId: command.folderId,
+            folderVersion: sequence.folderVersion,
+            bookmarkVersion: sequence.bookmarkVersion + 1,
+          };
+          const result = v.parse(bookmarkCommandResultSchema, {
+            status: 'acknowledged',
+            operationId: command.operationId,
+            revision: revision + 1,
+            folders: [],
+            bookmarks: [bookmark],
+            tags: tags.map((value) => ({ bookmarkId: bookmark.id, value })),
+            sequences: [updatedSequence],
+          });
+          await beforeCommandBatch();
+          await database.batch([
+            database
+              .prepare(
+                `INSERT INTO bookmark_command_assertions (operation_id, valid)
              SELECT ?, CASE WHEN
                (SELECT revision FROM bookmark_domain_state WHERE name = 'bookmarks') = ?
                AND (SELECT version FROM bookmark_sequences WHERE folder_id = ? AND kind = 'bookmarks') = ?
              THEN 1 ELSE 0 END`,
-          )
-          .bind(
-            command.operationId,
-            revision,
-            command.folderId,
-            command.expectedBookmarkSequenceVersion,
-          ),
-        database
-          .prepare(
-            `INSERT INTO bookmarks
+              )
+              .bind(
+                command.operationId,
+                revision,
+                command.folderId,
+                command.expectedBookmarkSequenceVersion,
+              ),
+            database
+              .prepare(
+                `INSERT INTO bookmarks
               (id, folder_id, url, title, note, rank, created_at, modified_at, version)
              VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)`,
-          )
-          .bind(
-            bookmark.id,
-            bookmark.folderId,
-            bookmark.url,
-            bookmark.title,
-            bookmark.note,
-            bookmark.rank,
-            bookmark.createdAt,
-            bookmark.modifiedAt,
-          ),
-        ...tags.map((value) =>
-          database
-            .prepare(
-              'INSERT INTO bookmark_tags (bookmark_id, display_value, lowercase_key) VALUES (?, ?, ?)',
-            )
-            .bind(bookmark.id, value, value.toLocaleLowerCase()),
-        ),
-        database
-          .prepare(
-            "UPDATE bookmark_sequences SET version = version + 1 WHERE folder_id = ? AND kind = 'bookmarks'",
-          )
-          .bind(command.folderId),
-        database.prepare(
-          "UPDATE bookmark_domain_state SET revision = revision + 1 WHERE name = 'bookmarks'",
-        ),
-        ...storeResultStatements(command, result, timestamp, expiresAt),
-      ]);
-      return result;
-    }
+              )
+              .bind(
+                bookmark.id,
+                bookmark.folderId,
+                bookmark.url,
+                bookmark.title,
+                bookmark.note,
+                bookmark.rank,
+                bookmark.createdAt,
+                bookmark.modifiedAt,
+              ),
+            ...tags.map((value) =>
+              database
+                .prepare(
+                  'INSERT INTO bookmark_tags (bookmark_id, display_value, lowercase_key) VALUES (?, ?, ?)',
+                )
+                .bind(bookmark.id, value, value.toLocaleLowerCase()),
+            ),
+            database
+              .prepare(
+                "UPDATE bookmark_sequences SET version = version + 1 WHERE folder_id = ? AND kind = 'bookmarks'",
+              )
+              .bind(command.folderId),
+            database.prepare(
+              "UPDATE bookmark_domain_state SET revision = revision + 1 WHERE name = 'bookmarks'",
+            ),
+            ...storeResultStatements(command, result, timestamp, expiresAt),
+          ]);
+          return result;
+        },
 
-    const bookmark = await bookmarkStatement(database, command.bookmarkId).first<BookmarkRow>();
-    if (!bookmark) return conflict(command, 'missing_entity');
-    if (bookmark.version !== command.bookmarkVersion) {
-      return conflict(command, 'stale_entity', { bookmarkId: command.bookmarkId });
-    }
-    const tags = normalizeBookmarkTags(command.tags);
-    const updated: Bookmark = {
-      ...bookmark,
-      url: command.url,
-      title: command.title,
-      note: command.note,
-      modifiedAt: timestamp,
-      version: bookmark.version + 1,
-    };
-    const result = v.parse(bookmarkCommandResultSchema, {
-      status: 'acknowledged',
-      operationId: command.operationId,
-      revision: revision + 1,
-      folders: [],
-      bookmarks: [updated],
-      tags: tags.map((value) => ({ bookmarkId: bookmark.id, value })),
-      sequences: [],
-    });
-    await database.batch([
-      database
-        .prepare(
-          `INSERT INTO bookmark_command_assertions (operation_id, valid)
+        editBookmark: async (command) => {
+          const bookmark = await bookmarkStatement(
+            database,
+            command.bookmarkId,
+          ).first<BookmarkRow>();
+          if (!bookmark) return conflict(command, 'missing_entity');
+          if (bookmark.version !== command.bookmarkVersion) {
+            return conflict(command, 'stale_entity', { bookmarkId: command.bookmarkId });
+          }
+          const tags = normalizeBookmarkTags(command.tags);
+          const updated: Bookmark = {
+            ...bookmark,
+            url: command.url,
+            title: command.title,
+            note: command.note,
+            modifiedAt: timestamp,
+            version: bookmark.version + 1,
+          };
+          const result = v.parse(bookmarkCommandResultSchema, {
+            status: 'acknowledged',
+            operationId: command.operationId,
+            revision: revision + 1,
+            folders: [],
+            bookmarks: [updated],
+            tags: tags.map((value) => ({ bookmarkId: bookmark.id, value })),
+            sequences: [],
+          });
+          await beforeCommandBatch();
+          await database.batch([
+            database
+              .prepare(
+                `INSERT INTO bookmark_command_assertions (operation_id, valid)
            SELECT ?, CASE WHEN
              (SELECT revision FROM bookmark_domain_state WHERE name = 'bookmarks') = ?
              AND (SELECT version FROM bookmarks WHERE id = ?) = ?
            THEN 1 ELSE 0 END`,
-        )
-        .bind(command.operationId, revision, command.bookmarkId, command.bookmarkVersion),
-      database
-        .prepare(
-          `UPDATE bookmarks
+              )
+              .bind(command.operationId, revision, command.bookmarkId, command.bookmarkVersion),
+            database
+              .prepare(
+                `UPDATE bookmarks
               SET url = ?, title = ?, note = ?, modified_at = ?, version = version + 1
             WHERE id = ?`,
+              )
+              .bind(command.url, command.title, command.note, timestamp, command.bookmarkId),
+            database
+              .prepare('DELETE FROM bookmark_tags WHERE bookmark_id = ?')
+              .bind(command.bookmarkId),
+            ...tags.map((value) =>
+              database
+                .prepare(
+                  'INSERT INTO bookmark_tags (bookmark_id, display_value, lowercase_key) VALUES (?, ?, ?)',
+                )
+                .bind(command.bookmarkId, value, value.toLocaleLowerCase()),
+            ),
+            database.prepare(
+              "UPDATE bookmark_domain_state SET revision = revision + 1 WHERE name = 'bookmarks'",
+            ),
+            ...storeResultStatements(command, result, timestamp, expiresAt),
+          ]);
+          return result;
+        },
+      });
+    } catch (error) {
+      const settledAfterRace = await database
+        .prepare(
+          `SELECT result_json AS resultJson
+             FROM bookmark_idempotency_results
+            WHERE operation_id = ?`,
         )
-        .bind(command.url, command.title, command.note, timestamp, command.bookmarkId),
-      database.prepare('DELETE FROM bookmark_tags WHERE bookmark_id = ?').bind(command.bookmarkId),
-      ...tags.map((value) =>
-        database
-          .prepare(
-            'INSERT INTO bookmark_tags (bookmark_id, display_value, lowercase_key) VALUES (?, ?, ?)',
-          )
-          .bind(command.bookmarkId, value, value.toLocaleLowerCase()),
-      ),
-      database.prepare(
-        "UPDATE bookmark_domain_state SET revision = revision + 1 WHERE name = 'bookmarks'",
-      ),
-      ...storeResultStatements(command, result, timestamp, expiresAt),
-    ]);
-    return result;
+        .bind(command.operationId)
+        .first<IdempotencyRow>();
+      if (settledAfterRace) {
+        return v.parse(bookmarkCommandResultSchema, JSON.parse(settledAfterRace.resultJson));
+      }
+      if (!isAssertionFailure(error)) throw error;
+      return classifyAssertionConflict(command);
+    }
   };
 
   return {

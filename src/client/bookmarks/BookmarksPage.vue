@@ -17,11 +17,20 @@ const drawerOpen = ref(false);
 const initialized = ref(false);
 const searchInput = ref<HTMLInputElement>();
 const selectedSearchResult = ref(0);
+type EditorValue = {
+  name?: string;
+  url?: string;
+  title?: string;
+  note?: string;
+  tags?: string[];
+};
 const editor = ref<{
   kind: 'folder' | 'bookmark';
   folder?: BookmarkFolder;
   bookmark?: Bookmark;
 } | null>(null);
+const editorDraft = ref<EditorValue>({});
+const editorInitialValue = ref<EditorValue>({});
 const desktopEditingAvailable = ref(false);
 const editMode = ref(false);
 const stateModule = createBookmarkState({
@@ -34,10 +43,6 @@ let unsubscribe: (() => void) | undefined;
 let desktopMedia: MediaQueryList | undefined;
 const updateDesktopEditing = () => {
   desktopEditingAvailable.value = desktopMedia?.matches ?? false;
-  if (!desktopEditingAvailable.value) {
-    editor.value = null;
-    editMode.value = false;
-  }
 };
 
 const searchOpen = computed(() => state.value.searchQuery.trim().length > 0);
@@ -143,12 +148,32 @@ const selectedSequence = computed(() =>
     : undefined,
 );
 
+const copyEditorValue = (value: EditorValue): EditorValue => ({
+  ...value,
+  ...(value.tags ? { tags: [...value.tags] } : {}),
+});
+
 const openFolderEditor = (folder?: BookmarkFolder) => {
+  editorInitialValue.value = { name: folder?.name ?? '' };
+  editorDraft.value = copyEditorValue(editorInitialValue.value);
   editor.value = { kind: 'folder', ...(folder ? { folder } : {}) };
 };
 
 const openBookmarkEditor = (bookmark?: Bookmark) => {
+  editorInitialValue.value = {
+    url: bookmark?.url ?? '',
+    title: bookmark?.title ?? '',
+    note: bookmark?.note ?? '',
+    tags: bookmark ? [...(state.value.tagsByBookmark[bookmark.id] ?? [])] : [],
+  };
+  editorDraft.value = copyEditorValue(editorInitialValue.value);
   editor.value = { kind: 'bookmark', ...(bookmark ? { bookmark } : {}) };
+};
+
+const closeEditor = () => {
+  editor.value = null;
+  editorDraft.value = {};
+  editorInitialValue.value = {};
 };
 
 const saveEditor = async (value: {
@@ -203,12 +228,12 @@ const saveEditor = async (value: {
   }
   const result = await stateModule.executeCommand(command);
   if (result?.status === 'acknowledged') {
-    editor.value = null;
+    closeEditor();
   } else if (result?.status === 'conflict' && result.code === 'stale_entity') {
     if (activeEditor.kind === 'folder' && result.folders[0]) {
-      editor.value = { kind: 'folder', folder: result.folders[0] };
+      openFolderEditor(result.folders[0]);
     } else if (activeEditor.kind === 'bookmark' && result.bookmarks[0]) {
-      editor.value = { kind: 'bookmark', bookmark: result.bookmarks[0] };
+      openBookmarkEditor(result.bookmarks[0]);
     }
   }
 };
@@ -220,10 +245,6 @@ onMounted(async () => {
   document.addEventListener('keydown', handleGlobalKeydown);
   unsubscribe = stateModule.subscribe((replacement) => {
     state.value = replacement;
-    if (replacement.syncStatus === 'offline') {
-      editor.value = null;
-      editMode.value = false;
-    }
     const selectedFolderId = replacement.selectedFolder?.id;
     if (
       initialized.value &&
@@ -557,9 +578,11 @@ onUnmounted(() => {
       :kind="editor.kind"
       :folder="editor.folder"
       :bookmark="editor.bookmark"
-      :tags="editor.bookmark ? (state.tagsByBookmark[editor.bookmark.id] ?? []) : []"
+      :value="editorDraft"
+      :initial-value="editorInitialValue"
       :saving="state.writeStatus === 'pending'"
-      @close="editor = null"
+      @close="closeEditor"
+      @draft="editorDraft = $event"
       @save="saveEditor"
     />
   </section>

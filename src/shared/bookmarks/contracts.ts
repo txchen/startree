@@ -185,5 +185,25 @@ export const bookmarkCommandResultSchema = v.variant('status', [
 export type BookmarkCommand = v.InferOutput<typeof bookmarkCommandSchema>;
 export type BookmarkCommandResult = v.InferOutput<typeof bookmarkCommandResultSchema>;
 
+export type BookmarkCommandHandlers<Result> = {
+  [Type in BookmarkCommand['type']]: (command: Extract<BookmarkCommand, { type: Type }>) => Result;
+};
+
+export const visitBookmarkCommand = <Result>(
+  command: BookmarkCommand,
+  handlers: BookmarkCommandHandlers<Result>,
+): Result => {
+  switch (command.type) {
+    case 'createFolder':
+      return handlers.createFolder(command);
+    case 'editFolder':
+      return handlers.editFolder(command);
+    case 'createBookmark':
+      return handlers.createBookmark(command);
+    case 'editBookmark':
+      return handlers.editBookmark(command);
+  }
+};
+
 export const bookmarkSnapshotEtag = (revision: number): string =>
   `"bookmarks-${BOOKMARK_SNAPSHOT_WIRE_FORMAT_VERSION}-${revision}"`;

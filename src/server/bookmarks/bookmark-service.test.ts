@@ -429,4 +429,52 @@ describe('Bookmark Service Interface', () => {
       results: [{ operation_id: 'a3000000-0000-4000-8000-000000000001' }],
     });
   });
+
+  it('returns a structured conflict when a precondition changes immediately before the batch', async () => {
+    const setupService = createBookmarkService(database, {
+      now: () => new Date(now),
+      randomUUID: () => '74000000-0000-4000-8000-000000000001',
+    });
+    await setupService.executeCommand({
+      type: 'createFolder',
+      operationId: 'a4000000-0000-4000-8000-000000000001',
+      parentId: SYSTEM_ROOT_FOLDER_ID,
+      expectedFolderSequenceVersion: 1,
+      name: 'Initial',
+    });
+    let raced = false;
+    const service = createBookmarkService(database, {
+      now: () => new Date(now),
+      beforeCommandBatch: async () => {
+        if (raced) return;
+        raced = true;
+        await database.batch([
+          database
+            .prepare('UPDATE bookmark_folders SET name = ?, version = version + 1 WHERE id = ?')
+            .bind('Concurrent', '74000000-0000-4000-8000-000000000001'),
+          database.prepare(
+            "UPDATE bookmark_domain_state SET revision = revision + 1 WHERE name = 'bookmarks'",
+          ),
+        ]);
+      },
+    });
+
+    const result = await service.executeCommand({
+      type: 'editFolder',
+      operationId: 'a4000000-0000-4000-8000-000000000002',
+      folderId: '74000000-0000-4000-8000-000000000001',
+      folderVersion: 1,
+      name: 'Owner edit',
+    });
+
+    expect(result).toMatchObject({
+      status: 'conflict',
+      code: 'stale_entity',
+      revision: 2,
+      folders: [{ name: 'Concurrent', version: 2 }],
+    });
+    expect((await service.getSnapshot()).folders).toContainEqual(
+      expect.objectContaining({ name: 'Concurrent', version: 2 }),
+    );
+  });
 });

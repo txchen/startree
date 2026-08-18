@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, onUnmounted, ref } from 'vue';
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
 
 import {
   bookmarkTitleFor,
@@ -7,42 +7,47 @@ import {
   type BookmarkFolder,
 } from '../../shared/bookmarks/contracts';
 
+type EditorValue = {
+  name?: string;
+  url?: string;
+  title?: string;
+  note?: string;
+  tags?: string[];
+};
+
 const props = defineProps<{
   kind: 'folder' | 'bookmark';
   folder?: BookmarkFolder;
   bookmark?: Bookmark;
-  tags?: readonly string[];
+  value: EditorValue;
+  initialValue: EditorValue;
   saving: boolean;
 }>();
 
 const emit = defineEmits<{
   close: [];
-  save: [value: { name?: string; url?: string; title?: string; note?: string; tags?: string[] }];
+  save: [value: EditorValue];
+  draft: [value: EditorValue];
 }>();
 
 const firstInput = ref<HTMLInputElement>();
-const name = ref(props.folder?.name ?? '');
-const url = ref(props.bookmark?.url ?? '');
-const title = ref(props.bookmark?.title ?? '');
-const note = ref(props.bookmark?.note ?? '');
-const tags = ref(props.tags?.join(', ') ?? '');
+const name = ref(props.value.name ?? '');
+const url = ref(props.value.url ?? '');
+const title = ref(props.value.title ?? '');
+const note = ref(props.value.note ?? '');
+const tags = ref(props.value.tags?.join(', ') ?? '');
 const discardPrompt = ref(false);
-const initial = JSON.stringify({
-  name: name.value,
-  url: url.value,
-  title: title.value,
-  note: note.value,
-  tags: tags.value,
-});
+const comparableValue = (): EditorValue =>
+  props.kind === 'folder'
+    ? { name: name.value }
+    : {
+        url: url.value,
+        title: title.value,
+        note: note.value,
+        tags: tags.value.trim() ? tags.value.split(',').map((tag) => tag.trim()) : [],
+      };
 const dirty = computed(
-  () =>
-    JSON.stringify({
-      name: name.value,
-      url: url.value,
-      title: title.value,
-      note: note.value,
-      tags: tags.value,
-    }) !== initial,
+  () => JSON.stringify(comparableValue()) !== JSON.stringify(props.initialValue),
 );
 const heading = computed(() =>
   props.kind === 'folder'
@@ -72,18 +77,10 @@ const fillHostname = () => {
 };
 
 const submit = () => {
-  emit(
-    'save',
-    props.kind === 'folder'
-      ? { name: name.value }
-      : {
-          url: url.value,
-          title: title.value,
-          note: note.value,
-          tags: tags.value.trim() ? tags.value.split(',').map((tag) => tag.trim()) : [],
-        },
-  );
+  emit('save', comparableValue());
 };
+
+watch([name, url, title, note, tags], () => emit('draft', comparableValue()));
 
 const handleKeydown = (event: KeyboardEvent) => {
   if (event.key !== 'Escape') return;

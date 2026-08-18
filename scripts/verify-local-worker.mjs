@@ -126,6 +126,18 @@ try {
     await page.getByRole('button', { name: 'Discard' }).click();
 
     await page.getByRole('button', { name: 'New Folder' }).click();
+    await page.getByLabel('Folder name').fill('Responsive draft');
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.getByRole('dialog').waitFor({ state: 'detached' });
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.getByRole('dialog').waitFor();
+    if ((await page.getByLabel('Folder name').inputValue()) !== 'Responsive draft') {
+      throw new Error('A responsive transition discarded dirty Folder work.');
+    }
+    await page.getByRole('button', { name: 'Cancel' }).click();
+    await page.getByRole('button', { name: 'Discard' }).click();
+
+    await page.getByRole('button', { name: 'New Folder' }).click();
     await page.getByLabel('Folder name').fill('UI Folder');
     await page.getByRole('button', { name: 'Save' }).click();
     await page.getByRole('dialog').waitFor({ state: 'detached' });
@@ -150,7 +162,20 @@ try {
       .click();
     await page.getByLabel('Title').fill('UI Bookmark Edited');
     await page.getByRole('button', { name: 'Save' }).click();
-    await page.getByRole('dialog').waitFor({ state: 'detached' });
+    try {
+      await page.getByRole('dialog').waitFor({ state: 'detached', timeout: 10_000 });
+    } catch {
+      const diagnostics = await page.locator('.bookmark-editor form').evaluate((form) => ({
+        valid: form.checkValidity(),
+        controls: [...form.elements].map((control) => ({
+          label: control.closest('label')?.textContent?.trim(),
+          valid: control.validity?.valid,
+          value: control.value,
+          validationMessage: control.validationMessage,
+        })),
+      }));
+      throw new Error(`Bookmark edit did not settle: ${JSON.stringify(diagnostics)}`);
+    }
     await page.getByRole('link', { name: /UI Bookmark Edited/ }).waitFor();
 
     await page.route('**/api/bookmarks/commands', async (route) => {
@@ -184,9 +209,39 @@ try {
     await page.getByRole('button', { name: 'Discard' }).click();
     await page.unrouteAll({ behavior: 'wait' });
 
-    await page.route('**/api/bookmarks/commands', (route) => route.abort('connectionfailed'));
+    await page.route('**/api/bookmarks/commands', async (route) => {
+      const staleCommand = route.request().postDataJSON();
+      const concurrentResponse = await fetch(`http://127.0.0.1:${port}/api/bookmarks/commands`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Origin: `http://127.0.0.1:${port}` },
+        body: JSON.stringify({
+          ...staleCommand,
+          operationId: crypto.randomUUID(),
+          title: 'Authoritative Bookmark',
+          note: 'Changed concurrently.',
+        }),
+      });
+      if (!concurrentResponse.ok) {
+        throw new Error(`Concurrent conflict fixture failed with ${concurrentResponse.status}.`);
+      }
+      await route.continue();
+    });
     await page
       .locator('.bookmark-card-shell', { hasText: 'UI Bookmark Edited' })
+      .locator('.bookmark-edit-button')
+      .click();
+    await page.getByLabel('Title').fill('Stale Bookmark edit');
+    await page.getByRole('button', { name: 'Save' }).click();
+    await page.getByText(/changed elsewhere/i).waitFor();
+    if ((await page.getByLabel('Title').inputValue()) !== 'Authoritative Bookmark') {
+      throw new Error('The conflict editor did not expose the authoritative Bookmark.');
+    }
+    await page.getByRole('button', { name: 'Cancel' }).click();
+    await page.unrouteAll({ behavior: 'wait' });
+
+    await page.route('**/api/bookmarks/commands', (route) => route.abort('connectionfailed'));
+    await page
+      .locator('.bookmark-card-shell', { hasText: 'Authoritative Bookmark' })
       .locator('.bookmark-edit-button')
       .click();
     await page.getByLabel('Note').fill('This update has an unknown result.');
