@@ -119,12 +119,12 @@ try {
     await page.getByText('A useful reference for complete-Worker verification.').waitFor();
     await page.getByText('阅读').waitFor();
 
-    await page.reload();
-    await page.getByRole('heading', { level: 1, name: 'Reading' }).waitFor();
     await page.goBack();
     await page.waitForURL(`**/bookmarks`);
     await page.getByRole('heading', { level: 1, name: 'Bookmarks' }).waitFor();
     await page.goForward();
+    await page.getByRole('heading', { level: 1, name: 'Reading' }).waitFor();
+    await page.reload();
     await page.getByRole('heading', { level: 1, name: 'Reading' }).waitFor();
 
     await page.evaluate(() => history.pushState({}, '', '/bookmarks/missing-folder'));
