@@ -6,6 +6,12 @@ if (environment !== 'preview' && environment !== 'production') {
 }
 
 const revision = run('git', ['rev-parse', 'HEAD'], { capture: true });
+const wranglerProfile = process.env.WRANGLER_PROFILE?.trim();
+const wrangler = (...args) => [
+  'wrangler',
+  ...args,
+  ...(wranglerProfile ? ['--profile', wranglerProfile] : []),
+];
 
 if (environment === 'production') {
   run('git', ['diff', '--quiet']);
@@ -23,9 +29,9 @@ if (environment === 'production') {
 run('npx', ['vp', 'run', 'check']);
 run('npx', ['vp', 'run', 'test']);
 run('npx', ['vp', 'run', 'build']);
-run('npx', ['wrangler', 'd1', 'migrations', 'list', 'DB', '--remote', '--env', environment]);
-run('npx', ['wrangler', 'd1', 'migrations', 'apply', 'DB', '--remote', '--env', environment]);
-run('npx', ['wrangler', 'deploy', '--env', environment, '--var', `APP_VERSION:${revision}`]);
+run('npx', wrangler('d1', 'migrations', 'list', 'DB', '--remote', '--env', environment));
+run('npx', wrangler('d1', 'migrations', 'apply', 'DB', '--remote', '--env', environment));
+run('npx', wrangler('deploy', '--env', environment, '--var', `APP_VERSION:${revision}`));
 
 const target =
   environment === 'production'

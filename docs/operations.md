@@ -40,6 +40,12 @@ vp run deploy:preview
 vp run deploy:production
 ```
 
+Select a non-default Wrangler authentication profile without changing the active profile:
+
+```sh
+WRANGLER_PROFILE=txchendev vp run deploy:preview
+```
+
 Both repeat local checks and the production build, list and apply only that environment's pending remote D1 migrations, and deploy that environment. Production additionally requires a clean working tree and a current commit already present on `origin/master`. Migrations must remain compatible with the previously deployed Worker. There is no default deployment command.
 
 `deploy:production` targets `https://startree.txchen.win` and must never be run merely to test configuration. Use `wrangler deploy --dry-run --env production` for a non-deploying configuration check.
