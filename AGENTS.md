@@ -1,3 +1,7 @@
+## Language
+
+User-agent conversations may be in Chinese. All repository content must be written in English, including code, comments, documentation, tests, configuration text, and commit messages.
+
 ## Agent skills
 
 ### Issue tracker
