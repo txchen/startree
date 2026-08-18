@@ -1061,4 +1061,86 @@ describe('Bookmark Service Interface', () => {
     });
     expect((await setup.getTrash()).roots).toEqual([]);
   });
+
+  it('keeps an independently trashed child root when its former parent is restored or purged', async () => {
+    const parentId = '8b000000-0000-4000-8000-000000000001';
+    const childId = '8b000000-0000-4000-8000-000000000002';
+    await database.batch(
+      [
+        [parentId, 'Parent', SYSTEM_ROOT_FOLDER_ID],
+        [childId, 'Child', parentId],
+      ].flatMap(([id, name, parent]) => [
+        database
+          .prepare(
+            `INSERT INTO bookmark_folders (id, name, parent_id, rank, created_at, modified_at, version) VALUES (?, ?, ?, 'a', ?, ?, 1)`,
+          )
+          .bind(id, name, parent, now, now),
+        database
+          .prepare(
+            "INSERT INTO bookmark_sequences (folder_id, kind, version) VALUES (?, 'folders', 1)",
+          )
+          .bind(id),
+        database
+          .prepare(
+            "INSERT INTO bookmark_sequences (folder_id, kind, version) VALUES (?, 'bookmarks', 1)",
+          )
+          .bind(id),
+      ]),
+    );
+    const service = createBookmarkService(database, { now: () => new Date(now) });
+    await service.executeCommand({
+      type: 'trashFolder',
+      operationId: 'b7000000-0000-4000-8000-000000000001',
+      folderId: childId,
+      folderVersion: 1,
+      parentId,
+      expectedFolderSequenceVersion: 1,
+    });
+    await service.executeCommand({
+      type: 'trashFolder',
+      operationId: 'b7000000-0000-4000-8000-000000000002',
+      folderId: parentId,
+      folderVersion: 1,
+      parentId: SYSTEM_ROOT_FOLDER_ID,
+      expectedFolderSequenceVersion: 1,
+    });
+    await service.executeCommand({
+      type: 'restoreTrash',
+      operationId: 'b7000000-0000-4000-8000-000000000003',
+      rootKind: 'folder',
+      rootId: parentId,
+      rootVersion: 2,
+      expectedDestinationSequenceVersion: 2,
+    });
+    expect((await service.getTrash()).roots.map((root) => root.id)).toEqual([childId]);
+
+    await service.executeCommand({
+      type: 'trashFolder',
+      operationId: 'b7000000-0000-4000-8000-000000000004',
+      folderId: parentId,
+      folderVersion: 3,
+      parentId: SYSTEM_ROOT_FOLDER_ID,
+      expectedFolderSequenceVersion: 3,
+    });
+    await service.executeCommand({
+      type: 'purgeTrash',
+      operationId: 'b7000000-0000-4000-8000-000000000005',
+      rootKind: 'folder',
+      rootId: parentId,
+      rootVersion: 4,
+    });
+    expect((await service.getTrash()).roots).toEqual([
+      expect.objectContaining({ id: childId, originalParentId: SYSTEM_ROOT_FOLDER_ID }),
+    ]);
+    expect(
+      await service.executeCommand({
+        type: 'restoreTrash',
+        operationId: 'b7000000-0000-4000-8000-000000000006',
+        rootKind: 'folder',
+        rootId: childId,
+        rootVersion: 2,
+        expectedDestinationSequenceVersion: 4,
+      }),
+    ).toMatchObject({ status: 'acknowledged' });
+  });
 });

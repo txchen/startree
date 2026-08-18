@@ -9,6 +9,7 @@ import {
   bookmarkSnapshotSchema,
   bookmarkTrashSchema,
   normalizeBookmarkTags,
+  SYSTEM_ROOT_FOLDER_ID,
   visitBookmarkCommand,
   type Bookmark,
   type BookmarkCommand,
@@ -35,6 +36,24 @@ type IdempotencyRow = { resultJson: string };
 declare const rankBrand: unique symbol;
 type Rank = string & { readonly [rankBrand]: true };
 type RankedRow = { id: string; rank: Rank };
+type TrashRootKind = Extract<BookmarkCommand, { type: 'restoreTrash' }>['rootKind'];
+
+const TRASH_RETENTION_MS = 30 * 24 * 60 * 60 * 1_000;
+
+const trashRootStorage = (kind: TrashRootKind) =>
+  kind === 'folder'
+    ? {
+        table: 'bookmark_folders' as const,
+        parentColumn: 'parent_id' as const,
+        originalParentColumn: 'original_parent_id' as const,
+        sequenceKind: 'folders' as const,
+      }
+    : {
+        table: 'bookmarks' as const,
+        parentColumn: 'folder_id' as const,
+        originalParentColumn: 'original_folder_id' as const,
+        sequenceKind: 'bookmarks' as const,
+      };
 
 const toRank = (value: string): Rank => value as Rank;
 
@@ -388,6 +407,77 @@ const incrementSequenceStatements = (
       )
       .bind(folderId),
   );
+
+type TrashDeletionPlan = { folderIds: string[]; bookmarkIds: string[] };
+
+const trashDeletionPlan = async (
+  database: D1Database,
+  folderRootIds: string[],
+  bookmarkRootIds: string[],
+): Promise<TrashDeletionPlan> => {
+  const folderRows = new Map<string, { id: string; parentId: string | null }>();
+  const bookmarkIds = new Set(bookmarkRootIds);
+  for (const rootId of folderRootIds) {
+    const folders = await database
+      .prepare(
+        `SELECT id, parent_id AS parentId FROM bookmark_folders
+          WHERE id = ? OR trash_root_id = ?`,
+      )
+      .bind(rootId, rootId)
+      .all<{ id: string; parentId: string | null }>();
+    folders.results.forEach((folder) => folderRows.set(folder.id, folder));
+    const bookmarks = await database
+      .prepare('SELECT id FROM bookmarks WHERE trash_root_id = ?')
+      .bind(rootId)
+      .all<{ id: string }>();
+    bookmarks.results.forEach((bookmark) => bookmarkIds.add(bookmark.id));
+  }
+  const depth = (id: string): number => {
+    const parentId = folderRows.get(id)?.parentId;
+    return parentId && folderRows.has(parentId) ? depth(parentId) + 1 : 0;
+  };
+  const folderIds = [...folderRows.keys()].sort(
+    (left, right) => depth(right) - depth(left) || left.localeCompare(right),
+  );
+  return { folderIds, bookmarkIds: [...bookmarkIds].sort() };
+};
+
+const executeTrashDeletionStatements = (
+  database: D1Database,
+  plan: TrashDeletionPlan,
+): D1PreparedStatement[] => {
+  const statements: D1PreparedStatement[] = [];
+  for (const folderId of plan.folderIds) {
+    statements.push(
+      database
+        .prepare(
+          `UPDATE bookmark_folders
+              SET parent_id = ?, original_parent_id = ?
+            WHERE trashed_at IS NOT NULL
+              AND id != ?
+              AND (parent_id = ? OR original_parent_id = ?)`,
+        )
+        .bind(SYSTEM_ROOT_FOLDER_ID, SYSTEM_ROOT_FOLDER_ID, folderId, folderId, folderId),
+      database
+        .prepare(
+          `UPDATE bookmarks
+              SET folder_id = ?, original_folder_id = ?
+            WHERE trashed_at IS NOT NULL
+              AND (folder_id = ? OR original_folder_id = ?)`,
+        )
+        .bind(SYSTEM_ROOT_FOLDER_ID, SYSTEM_ROOT_FOLDER_ID, folderId, folderId),
+    );
+  }
+  statements.push(
+    ...plan.bookmarkIds.map((id) =>
+      database.prepare('DELETE FROM bookmarks WHERE id = ?').bind(id),
+    ),
+    ...plan.folderIds.map((id) =>
+      database.prepare('DELETE FROM bookmark_folders WHERE id = ?').bind(id),
+    ),
+  );
+  return statements;
+};
 
 export const createBookmarkService = (
   database: D1Database,
@@ -1076,7 +1166,8 @@ export const createBookmarkService = (
     const restoreTrash = async (
       restoreCommand: Extract<BookmarkCommand, { type: 'restoreTrash' }>,
     ): Promise<BookmarkCommandResult> => {
-      const table = restoreCommand.rootKind === 'folder' ? 'bookmark_folders' : 'bookmarks';
+      const storage = trashRootStorage(restoreCommand.rootKind);
+      const table = storage.table;
       const root = await database
         .prepare(
           restoreCommand.rootKind === 'folder'
@@ -1103,13 +1194,11 @@ export const createBookmarkService = (
         database,
         root.originalParentId,
       ).first<FolderRow>();
-      const destinationId = originalParent
-        ? root.originalParentId
-        : '00000000-0000-4000-8000-000000000000';
+      const destinationId = originalParent ? root.originalParentId : SYSTEM_ROOT_FOLDER_ID;
       const sequence = await sequenceStatement(database, destinationId).first<SequenceRow>();
       if (!sequence) return conflict(restoreCommand, 'missing_entity');
       const sequenceVersion =
-        restoreCommand.rootKind === 'folder' ? sequence.folderVersion : sequence.bookmarkVersion;
+        storage.sequenceKind === 'folders' ? sequence.folderVersion : sequence.bookmarkVersion;
       if (sequenceVersion !== restoreCommand.expectedDestinationSequenceVersion) {
         return conflict(restoreCommand, 'stale_sequence', { sequenceFolderId: destinationId });
       }
@@ -1123,8 +1212,7 @@ export const createBookmarkService = (
           .first<{ id: string }>();
         if (duplicate) return conflict(restoreCommand, 'name_conflict', { folderId: duplicate.id });
       }
-      const parentColumn = restoreCommand.rootKind === 'folder' ? 'parent_id' : 'folder_id';
-      const kind: SequenceKind = restoreCommand.rootKind === 'folder' ? 'folders' : 'bookmarks';
+      const { parentColumn, sequenceKind: kind, originalParentColumn } = storage;
       const rankConflict = await database
         .prepare(
           `SELECT id FROM ${table} WHERE ${parentColumn} = ? AND rank = ? AND id != ?
@@ -1139,13 +1227,8 @@ export const createBookmarkService = (
       const restoredFolderIds = new Set<string>();
       if (restoreCommand.rootKind === 'folder') {
         const rows = await database
-          .prepare(
-            `WITH RECURSIVE subtree(id) AS (
-               SELECT id FROM bookmark_folders WHERE id = ?
-               UNION ALL SELECT child.id FROM bookmark_folders child JOIN subtree parent ON child.parent_id = parent.id
-             ) SELECT id FROM subtree`,
-          )
-          .bind(root.id)
+          .prepare(`SELECT id FROM bookmark_folders WHERE id = ? OR trash_root_id = ?`)
+          .bind(root.id, root.id)
           .all<{ id: string }>();
         restoredFolderIds.clear();
         rows.results.forEach((row) => restoredFolderIds.add(row.id));
@@ -1219,7 +1302,7 @@ export const createBookmarkService = (
           .prepare(
             `UPDATE ${table} SET ${parentColumn} = ?, rank = ?, trashed_at = NULL,
                     trash_root_id = NULL, modified_at = ?, version = version + 1,
-                    ${restoreCommand.rootKind === 'folder' ? 'original_parent_id' : 'original_folder_id'} = NULL,
+                    ${originalParentColumn} = NULL,
                     original_rank = NULL WHERE id = ?`,
           )
           .bind(destinationId, rank, timestamp, root.id),
@@ -1249,38 +1332,18 @@ export const createBookmarkService = (
     const purgeTrash = async (
       purgeCommand: Extract<BookmarkCommand, { type: 'purgeTrash' }>,
     ): Promise<BookmarkCommandResult> => {
-      const table = purgeCommand.rootKind === 'folder' ? 'bookmark_folders' : 'bookmarks';
+      const { table } = trashRootStorage(purgeCommand.rootKind);
       const root = await database
         .prepare(`SELECT id, version FROM ${table} WHERE id = ? AND trashed_at IS NOT NULL`)
         .bind(purgeCommand.rootId)
         .first<{ id: string; version: number }>();
       if (!root) return conflict(purgeCommand, 'missing_entity');
       if (root.version !== purgeCommand.rootVersion) return conflict(purgeCommand, 'stale_entity');
-      let folderIds: string[] = [];
-      let bookmarkIds: string[] = [];
-      if (purgeCommand.rootKind === 'folder') {
-        const folders = await database
-          .prepare(
-            `WITH RECURSIVE subtree(id, depth) AS (
-               SELECT id, 0 FROM bookmark_folders WHERE id = ?
-               UNION ALL SELECT child.id, parent.depth + 1 FROM bookmark_folders child
-                 JOIN subtree parent ON child.parent_id = parent.id
-             ) SELECT id FROM subtree ORDER BY depth DESC`,
-          )
-          .bind(root.id)
-          .all<{ id: string }>();
-        folderIds = folders.results.map((row) => row.id);
-        if (folderIds.length) {
-          const placeholders = folderIds.map(() => '?').join(', ');
-          const bookmarks = await database
-            .prepare(`SELECT id FROM bookmarks WHERE folder_id IN (${placeholders}) ORDER BY id`)
-            .bind(...folderIds)
-            .all<{ id: string }>();
-          bookmarkIds = bookmarks.results.map((row) => row.id);
-        }
-      } else {
-        bookmarkIds = [root.id];
-      }
+      const plan = await trashDeletionPlan(
+        database,
+        purgeCommand.rootKind === 'folder' ? [root.id] : [],
+        purgeCommand.rootKind === 'bookmark' ? [root.id] : [],
+      );
       const result = v.parse(bookmarkCommandResultSchema, {
         status: 'acknowledged',
         operationId: purgeCommand.operationId,
@@ -1289,8 +1352,8 @@ export const createBookmarkService = (
         bookmarks: [],
         tags: [],
         sequences: [],
-        deletedFolderIds: folderIds,
-        deletedBookmarkIds: bookmarkIds,
+        deletedFolderIds: plan.folderIds,
+        deletedBookmarkIds: plan.bookmarkIds,
       });
       await beforeCommandBatch();
       await database.batch([
@@ -1303,10 +1366,7 @@ export const createBookmarkService = (
              THEN 1 ELSE 0 END`,
           )
           .bind(purgeCommand.operationId, revision, root.id, root.version),
-        ...bookmarkIds.map((id) => database.prepare('DELETE FROM bookmarks WHERE id = ?').bind(id)),
-        ...folderIds.map((id) =>
-          database.prepare('DELETE FROM bookmark_folders WHERE id = ?').bind(id),
-        ),
+        ...executeTrashDeletionStatements(database, plan),
         database.prepare(
           "UPDATE bookmark_domain_state SET revision = revision + 1 WHERE name = 'bookmarks'",
         ),
@@ -1320,17 +1380,11 @@ export const createBookmarkService = (
     ): Promise<BookmarkCommandResult> => {
       if (emptyCommand.expectedRevision !== revision) return conflict(emptyCommand, 'stale_entity');
       const trash = await readTrash(database);
-      const orderedFolders = await database
-        .prepare(
-          `WITH RECURSIVE trashed(id, depth) AS (
-             SELECT id, 0 FROM bookmark_folders WHERE trashed_at IS NOT NULL
-             UNION ALL SELECT child.id, parent.depth + 1 FROM bookmark_folders child
-               JOIN trashed parent ON child.parent_id = parent.id
-           ) SELECT id FROM trashed ORDER BY depth DESC, id`,
-        )
-        .all<{ id: string }>();
-      const folderIds = orderedFolders.results.map((folder) => folder.id);
-      const bookmarkIds = trash.bookmarks.map((bookmark) => bookmark.id);
+      const plan = await trashDeletionPlan(
+        database,
+        trash.roots.filter((root) => root.kind === 'folder').map((root) => root.id),
+        trash.roots.filter((root) => root.kind === 'bookmark').map((root) => root.id),
+      );
       const result = v.parse(bookmarkCommandResultSchema, {
         status: 'acknowledged',
         operationId: emptyCommand.operationId,
@@ -1339,8 +1393,8 @@ export const createBookmarkService = (
         bookmarks: [],
         tags: [],
         sequences: [],
-        deletedFolderIds: folderIds,
-        deletedBookmarkIds: bookmarkIds,
+        deletedFolderIds: plan.folderIds,
+        deletedBookmarkIds: plan.bookmarkIds,
       });
       await beforeCommandBatch();
       await database.batch([
@@ -1352,10 +1406,7 @@ export const createBookmarkService = (
              THEN 1 ELSE 0 END`,
           )
           .bind(emptyCommand.operationId, revision),
-        ...bookmarkIds.map((id) => database.prepare('DELETE FROM bookmarks WHERE id = ?').bind(id)),
-        ...folderIds.map((id) =>
-          database.prepare('DELETE FROM bookmark_folders WHERE id = ?').bind(id),
-        ),
+        ...executeTrashDeletionStatements(database, plan),
         database.prepare(
           "UPDATE bookmark_domain_state SET revision = revision + 1 WHERE name = 'bookmarks'",
         ),
@@ -1709,7 +1760,7 @@ export const createBookmarkService = (
   };
 
   const expireTrash = async (): Promise<number> => {
-    const cutoff = new Date(now().getTime() - 30 * 24 * 60 * 60 * 1_000).toISOString();
+    const cutoff = new Date(now().getTime() - TRASH_RETENTION_MS).toISOString();
     const [folderRoots, bookmarkRoots] = await Promise.all([
       database
         .prepare('SELECT id FROM bookmark_folders WHERE trashed_at IS NOT NULL AND trashed_at <= ?')
@@ -1722,34 +1773,13 @@ export const createBookmarkService = (
     ]);
     const rootCount = folderRoots.results.length + bookmarkRoots.results.length;
     if (!rootCount) return 0;
-    const folderIds: string[] = [];
-    const bookmarkIds = bookmarkRoots.results.map((row) => row.id);
-    for (const root of folderRoots.results) {
-      const folders = await database
-        .prepare(
-          `WITH RECURSIVE subtree(id, depth) AS (
-             SELECT id, 0 FROM bookmark_folders WHERE id = ?
-             UNION ALL SELECT child.id, parent.depth + 1 FROM bookmark_folders child
-               JOIN subtree parent ON child.parent_id = parent.id
-           ) SELECT id FROM subtree ORDER BY depth DESC`,
-        )
-        .bind(root.id)
-        .all<{ id: string }>();
-      const ids = folders.results.map((row) => row.id);
-      folderIds.push(...ids);
-      if (ids.length) {
-        const bookmarks = await database
-          .prepare(`SELECT id FROM bookmarks WHERE folder_id IN (${ids.map(() => '?').join(', ')})`)
-          .bind(...ids)
-          .all<{ id: string }>();
-        bookmarkIds.push(...bookmarks.results.map((row) => row.id));
-      }
-    }
+    const plan = await trashDeletionPlan(
+      database,
+      folderRoots.results.map((root) => root.id),
+      bookmarkRoots.results.map((root) => root.id),
+    );
     await database.batch([
-      ...bookmarkIds.map((id) => database.prepare('DELETE FROM bookmarks WHERE id = ?').bind(id)),
-      ...folderIds.map((id) =>
-        database.prepare('DELETE FROM bookmark_folders WHERE id = ?').bind(id),
-      ),
+      ...executeTrashDeletionStatements(database, plan),
       database.prepare(
         "UPDATE bookmark_domain_state SET revision = revision + 1 WHERE name = 'bookmarks'",
       ),

@@ -41,7 +41,8 @@ const moveEditor = ref<{ kind: 'folder' | 'bookmark'; id: string } | null>(null)
 const moveDestinationId = ref(SYSTEM_ROOT_FOLDER_ID);
 const moveBeforeId = ref('');
 const trashOpen = ref(false);
-const lastDeletedRoot = ref<BookmarkTrashRoot | null>(null);
+const lastTrashedRoot = ref<BookmarkTrashRoot | null>(null);
+const lastTrashedRootVersion = ref<number | null>(null);
 const stateModule = createBookmarkState({
   remote: createFetchBookmarkAdapter(),
   storage: createIndexedDbBookmarkAdapter(),
@@ -396,12 +397,18 @@ const trashBookmark = async (bookmark: Bookmark) => {
     expectedBookmarkSequenceVersion: sequence.bookmarkVersion,
   });
   if (result?.status === 'acknowledged') {
-    lastDeletedRoot.value =
-      state.value.trash?.roots.find((root) => root.id === bookmark.id) ?? null;
+    lastTrashedRoot.value = {
+      kind: 'bookmark',
+      id: bookmark.id,
+      deletedAt: new Date().toISOString(),
+      originalParentId: bookmark.folderId,
+      originalRank: bookmark.rank,
+    };
+    lastTrashedRootVersion.value = bookmark.version + 1;
   }
 };
 
-const folderContents = (folderId: string) => {
+const folderSubtreeCounts = (folderId: string) => {
   const ids = new Set([folderId]);
   let changed = true;
   while (changed) {
@@ -423,7 +430,7 @@ const trashFolder = async (folder: BookmarkFolder) => {
   if (!folder.parentId) return;
   const sequence = sequenceFor(folder.parentId);
   if (!sequence) return;
-  const contents = folderContents(folder.id);
+  const contents = folderSubtreeCounts(folder.id);
   if (
     (contents.folders || contents.bookmarks) &&
     !window.confirm(
@@ -440,7 +447,14 @@ const trashFolder = async (folder: BookmarkFolder) => {
     expectedFolderSequenceVersion: sequence.folderVersion,
   });
   if (result?.status === 'acknowledged') {
-    lastDeletedRoot.value = state.value.trash?.roots.find((root) => root.id === folder.id) ?? null;
+    lastTrashedRoot.value = {
+      kind: 'folder',
+      id: folder.id,
+      deletedAt: new Date().toISOString(),
+      originalParentId: folder.parentId,
+      originalRank: folder.rank,
+    };
+    lastTrashedRootVersion.value = folder.version + 1;
   }
 };
 
@@ -454,7 +468,9 @@ const restoreTrashRoot = async (root: BookmarkTrashRoot) => {
     ? root.originalParentId
     : SYSTEM_ROOT_FOLDER_ID;
   const sequence = sequenceFor(activeParent);
-  const version = trashRecordVersion(root);
+  const version =
+    trashRecordVersion(root) ??
+    (lastTrashedRoot.value?.id === root.id ? lastTrashedRootVersion.value : null);
   if (!sequence || !version) return;
   const result = await stateModule.executeCommand({
     type: 'restoreTrash',
@@ -465,8 +481,9 @@ const restoreTrashRoot = async (root: BookmarkTrashRoot) => {
     expectedDestinationSequenceVersion:
       root.kind === 'folder' ? sequence.folderVersion : sequence.bookmarkVersion,
   });
-  if (result?.status === 'acknowledged' && lastDeletedRoot.value?.id === root.id) {
-    lastDeletedRoot.value = null;
+  if (result?.status === 'acknowledged' && lastTrashedRoot.value?.id === root.id) {
+    lastTrashedRoot.value = null;
+    lastTrashedRootVersion.value = null;
   }
 };
 
@@ -486,8 +503,10 @@ const purgeTrashRoot = async (root: BookmarkTrashRoot) => {
     rootId: root.id,
     rootVersion: version,
   });
-  if (result?.status === 'acknowledged' && lastDeletedRoot.value?.id === root.id)
-    lastDeletedRoot.value = null;
+  if (result?.status === 'acknowledged' && lastTrashedRoot.value?.id === root.id) {
+    lastTrashedRoot.value = null;
+    lastTrashedRootVersion.value = null;
+  }
 };
 
 const emptyTrash = async () => {
@@ -503,7 +522,10 @@ const emptyTrash = async () => {
     operationId: crypto.randomUUID(),
     expectedRevision: state.value.trash.revision,
   });
-  if (result?.status === 'acknowledged') lastDeletedRoot.value = null;
+  if (result?.status === 'acknowledged') {
+    lastTrashedRoot.value = null;
+    lastTrashedRootVersion.value = null;
+  }
 };
 
 onMounted(async () => {
@@ -571,9 +593,9 @@ onUnmounted(() => {
 
     <div class="bookmarks-workspace">
       <p v-if="state.notice" class="navigation-notice" role="status">{{ state.notice }}</p>
-      <div v-if="lastDeletedRoot" class="undo-notice" role="status">
+      <div v-if="lastTrashedRoot" class="undo-notice" role="status">
         <span>Moved to Trash.</span>
-        <button type="button" @click="restoreTrashRoot(lastDeletedRoot)">Undo</button>
+        <button type="button" @click="restoreTrashRoot(lastTrashedRoot)">Undo</button>
       </div>
 
       <div

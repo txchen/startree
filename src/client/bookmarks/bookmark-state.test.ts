@@ -123,10 +123,12 @@ describe('Bookmark state Module Interface', () => {
       deletedBookmarkIds: [bookmark.id],
     });
     const lifecycle = createMemoryBookmarkLifecycleAdapter();
+    const search = createMiniSearchBookmarkAdapter();
     const state = createBookmarkState({
       remote,
       storage: createMemoryBookmarkStorageAdapter(),
       lifecycle,
+      search,
     });
     await state.initialize({ folderId });
 
@@ -140,6 +142,8 @@ describe('Bookmark state Module Interface', () => {
     });
 
     expect(state.getState().directBookmarks.map((item) => item.id)).not.toContain(bookmark.id);
+    await state.search('Now Bookmark');
+    expect(state.getState().searchResults.map((result) => result.id)).not.toContain(bookmark.id);
     expect(state.getState().trash?.roots).toEqual([expect.objectContaining({ id: bookmark.id })]);
     lifecycle.setOnline(false);
     await state.loadTrash();

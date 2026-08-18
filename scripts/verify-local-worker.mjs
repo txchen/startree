@@ -330,6 +330,9 @@ try {
       folderConfirmation = dialog.message();
       await dialog.accept();
     });
+    await page.route('**/api/bookmarks/trash', (route) =>
+      route.fulfill({ status: 503, contentType: 'application/json', body: '{}' }),
+    );
     await page.getByRole('button', { name: 'Move Articles to Trash' }).click();
     await page.getByText('Moved to Trash.').waitFor();
     if (
@@ -339,12 +342,19 @@ try {
       throw new Error(`Folder Trash confirmation omitted subtree counts: ${folderConfirmation}`);
     }
     await page.getByRole('button', { name: 'Undo' }).click();
+    await page.unroute('**/api/bookmarks/trash');
     await page.locator('.folder-grid').getByText('Articles', { exact: true }).waitFor();
 
     await page.locator('.folder-tile button').filter({ hasText: 'Articles' }).click();
     await page.getByRole('heading', { level: 1, name: 'Articles' }).waitFor();
     await page.getByRole('button', { name: 'Move Authoritative Bookmark to Trash' }).click();
     await page.getByText('Moved to Trash.').waitFor();
+    await page.locator('#bookmark-search-input').fill('Authoritative Bookmark');
+    await page.waitForFunction(
+      () =>
+        !document.querySelector('.search-results')?.textContent?.includes('Authoritative Bookmark'),
+    );
+    await page.locator('#bookmark-search-input').fill('');
     await page.getByRole('button', { name: 'Trash', exact: true }).click();
     await page.getByRole('heading', { level: 1, name: 'Trash' }).waitFor();
     await page.getByText('Authoritative Bookmark', { exact: true }).waitFor();
@@ -448,12 +458,39 @@ try {
           }
         }
       }
+      const database = await new Promise((resolve, reject) => {
+        const request = indexedDB.open('startree-bookmarks');
+        request.addEventListener('success', () => resolve(request.result), { once: true });
+        request.addEventListener('error', () => reject(request.error), { once: true });
+      });
+      const activeSnapshotKey = await new Promise((resolve, reject) => {
+        const request = database
+          .transaction('settings')
+          .objectStore('settings')
+          .get('activeSnapshotKey');
+        request.addEventListener('success', () => resolve(request.result?.value), { once: true });
+        request.addEventListener('error', () => reject(request.error), { once: true });
+      });
+      const activeSnapshot = await new Promise((resolve, reject) => {
+        const request = database
+          .transaction('completeSnapshots')
+          .objectStore('completeSnapshots')
+          .get(activeSnapshotKey);
+        request.addEventListener('success', () => resolve(request.result?.snapshot), {
+          once: true,
+        });
+        request.addEventListener('error', () => reject(request.error), { once: true });
+      });
+      database.close();
       return {
         cacheNames,
         cachedUrls,
         containsBookmarkData,
         localStorageKeys: Object.keys(localStorage),
         sessionStorageKeys: Object.keys(sessionStorage),
+        containsTrashedSnapshotData:
+          JSON.stringify(activeSnapshot).includes('Authoritative Bookmark') ||
+          JSON.stringify(activeSnapshot).includes('UI Folder Renamed'),
       };
     });
     if (
@@ -461,7 +498,8 @@ try {
       localStorageAudit.cachedUrls.some((url) => url.includes('/api/')) ||
       localStorageAudit.containsBookmarkData ||
       localStorageAudit.localStorageKeys.length ||
-      localStorageAudit.sessionStorageKeys.length
+      localStorageAudit.sessionStorageKeys.length ||
+      localStorageAudit.containsTrashedSnapshotData
     ) {
       throw new Error(
         `Structured Bookmark data escaped IndexedDB: ${JSON.stringify(localStorageAudit)}`,

@@ -641,6 +641,12 @@ export const createBookmarkState = (adapters: {
         state.snapshot = mergeCommandResult(priorSnapshot, result);
         const synchronizedAt = new Date(lifecycle.now()).toISOString();
         await adapters.storage.writeSnapshot(state.snapshot, { synchronizedAt });
+        if (adapters.search) {
+          await adapters.search.replace(state.snapshot);
+          if (state.searchQuery) {
+            state.searchResults = [...(await adapters.search.search(state.searchQuery))];
+          }
+        }
         state.lastSuccessfulSyncAt = synchronizedAt;
       }
       state.unconfirmedOperations = state.unconfirmedOperations.filter(
