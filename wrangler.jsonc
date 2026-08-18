@@ -1,0 +1,81 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "startree",
+  "main": "src/server/index.ts",
+  "compatibility_date": "2026-08-18",
+  "compatibility_flags": ["nodejs_compat"],
+  "observability": {
+    "enabled": true,
+    "head_sampling_rate": 1,
+  },
+  "env": {
+    "local": {
+      "name": "startree-local",
+      "workers_dev": false,
+      "assets": {
+        "directory": "./dist",
+        "binding": "ASSETS",
+        "not_found_handling": "single-page-application",
+        "run_worker_first": true,
+      },
+      "vars": {
+        "APP_VERSION": "local",
+      },
+      "d1_databases": [
+        {
+          "binding": "DB",
+          "database_name": "startree-local",
+          "migrations_dir": "./migrations",
+        },
+      ],
+    },
+    "preview": {
+      "name": "startree-preview",
+      "workers_dev": true,
+      "preview_urls": false,
+      "assets": {
+        "directory": "./dist",
+        "binding": "ASSETS",
+        "not_found_handling": "single-page-application",
+        "run_worker_first": true,
+      },
+      "vars": {
+        "APP_VERSION": "preview",
+      },
+      "d1_databases": [
+        {
+          "binding": "DB",
+          "database_name": "startree-preview",
+          "migrations_dir": "./migrations",
+        },
+      ],
+    },
+    "production": {
+      "name": "startree-production",
+      "workers_dev": false,
+      "preview_urls": false,
+      "assets": {
+        "directory": "./dist",
+        "binding": "ASSETS",
+        "not_found_handling": "single-page-application",
+        "run_worker_first": true,
+      },
+      "routes": [
+        {
+          "pattern": "startree.txchen.win",
+          "custom_domain": true,
+        },
+      ],
+      "vars": {
+        "APP_VERSION": "production",
+      },
+      "d1_databases": [
+        {
+          "binding": "DB",
+          "database_name": "startree-production",
+          "migrations_dir": "./migrations",
+        },
+      ],
+    },
+  },
+}

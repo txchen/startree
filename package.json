@@ -1,0 +1,50 @@
+{
+  "name": "startree",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "dev:worker": "vp build && wrangler dev --env local",
+    "format": "vp fmt --write",
+    "format:check": "vp fmt --check",
+    "lint": "vp lint",
+    "typecheck": "vue-tsc --build --force && tsc --project tsconfig.server.json --noEmit",
+    "check": "vp run format:check && vp run lint && vp run typecheck",
+    "test": "vp test --run",
+    "build": "vp build",
+    "types": "wrangler types --env local",
+    "db:migrate:local": "wrangler d1 migrations apply DB --local --env local",
+    "verify:migrations": "node scripts/verify-migrations.mjs",
+    "verify:config": "node scripts/verify-environments.mjs",
+    "verify:local": "node scripts/verify-local-worker.mjs",
+    "verify": "vp run check && vp run test && vp run build && vp run verify:migrations && vp run verify:config && vp run verify:local",
+    "deploy:preview": "node scripts/deploy.mjs preview",
+    "deploy:production": "node scripts/deploy.mjs production"
+  },
+  "dependencies": {
+    "hono": "^4.9.2",
+    "valibot": "^1.1.0",
+    "vue": "^3.5.18",
+    "vue-router": "^4.5.1"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^5.20260818.1",
+    "@types/node": "^26.2.0",
+    "@vitejs/plugin-vue": "^6.0.8",
+    "@vue/tsconfig": "^0.9.1",
+    "jsonc-parser": "^3.3.1",
+    "typescript": "6.0.3",
+    "vite-plus": "^0.2.9",
+    "vue-tsc": "^3.3.10",
+    "wrangler": "^4.124.0"
+  },
+  "overrides": {
+    "typescript": "6.0.3",
+    "vite": "npm:@voidzero-dev/vite-plus-core@latest"
+  },
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "packageManager": "npm@11.5.2"
+}
