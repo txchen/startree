@@ -56,11 +56,18 @@ export type BookmarkLifecycleAdapter = {
   subscribe(event: 'online' | 'offline' | 'visibilitychange', listener: () => void): () => void;
 };
 
+export type BookmarkRevisionChannel = {
+  announce(revision: number): void;
+  subscribe(listener: (revision: number) => void): () => void;
+  close(): void;
+};
+
 export type BookmarkStateView = Readonly<{
   status: 'loading' | 'ready' | 'not-found' | 'error';
   snapshotRevision: number | null;
   selectedFolder: BookmarkFolder | null;
   folders: readonly BookmarkFolder[];
+  bookmarks: readonly Bookmark[];
   breadcrumbs: readonly BookmarkFolder[];
   directFolders: readonly BookmarkFolder[];
   directBookmarks: readonly Bookmark[];
@@ -129,6 +136,26 @@ const createDefaultLifecycleAdapter = (): BookmarkLifecycleAdapter => ({
 const byRank = <Item extends { id: string; rank: string }>(left: Item, right: Item): number =>
   left.rank.localeCompare(right.rank) || left.id.localeCompare(right.id);
 
+const positionOptimistically = <Item extends { id: string; rank: string }>(
+  items: Item[],
+  movingId: string,
+  belongsToDestination: (item: Item) => boolean,
+  relocate: (item: Item) => Item,
+  beforeId?: string,
+): Item[] => {
+  const moving = items.find((item) => item.id === movingId);
+  if (!moving) return items;
+  const ordered = items
+    .filter((item) => belongsToDestination(item) && item.id !== movingId)
+    .sort(byRank);
+  const index = beforeId ? ordered.findIndex((item) => item.id === beforeId) : ordered.length;
+  ordered.splice(index < 0 ? ordered.length : index, 0, relocate(moving));
+  const replacements = new Map(
+    ordered.map((item, rank) => [item.id, { ...item, rank: `${rank}`.padStart(8, '0') }]),
+  );
+  return items.map((item) => replacements.get(item.id) ?? item);
+};
+
 const rootDisplayFolder = (folder: BookmarkFolder): BookmarkFolder => ({
   ...folder,
   name: 'Bookmarks',
@@ -155,6 +182,7 @@ const viewFor = (state: MutableState): BookmarkStateView => {
     snapshotRevision: state.snapshot?.revision ?? null,
     selectedFolder,
     folders,
+    bookmarks: state.snapshot?.bookmarks ?? [],
     breadcrumbs,
     directFolders: selectedFolder
       ? folders.filter((folder) => folder.parentId === selectedFolder.id).sort(byRank)
@@ -186,6 +214,7 @@ export const createBookmarkState = (adapters: {
   storage: BookmarkStorageAdapter;
   lifecycle?: BookmarkLifecycleAdapter;
   search?: BookmarkSearchAdapter;
+  revisionChannel?: BookmarkRevisionChannel;
 }): BookmarkState => {
   const lifecycle = adapters.lifecycle ?? createDefaultLifecycleAdapter();
   const state: MutableState = {
@@ -393,6 +422,46 @@ export const createBookmarkState = (adapters: {
           })),
         ];
       },
+      reorderFolder(reorderCommand) {
+        if (!state.snapshot) return;
+        state.snapshot.folders = positionOptimistically(
+          state.snapshot.folders,
+          reorderCommand.folderId,
+          (folder) => folder.parentId === reorderCommand.parentId,
+          (folder) => folder,
+          reorderCommand.beforeFolderId,
+        );
+      },
+      moveFolder(moveCommand) {
+        if (!state.snapshot) return;
+        state.snapshot.folders = positionOptimistically(
+          state.snapshot.folders,
+          moveCommand.folderId,
+          (folder) => folder.parentId === moveCommand.destinationFolderId,
+          (folder) => ({ ...folder, parentId: moveCommand.destinationFolderId }),
+          moveCommand.beforeFolderId,
+        );
+      },
+      reorderBookmark(reorderCommand) {
+        if (!state.snapshot) return;
+        state.snapshot.bookmarks = positionOptimistically(
+          state.snapshot.bookmarks,
+          reorderCommand.bookmarkId,
+          (bookmark) => bookmark.folderId === reorderCommand.folderId,
+          (bookmark) => bookmark,
+          reorderCommand.beforeBookmarkId,
+        );
+      },
+      moveBookmark(moveCommand) {
+        if (!state.snapshot) return;
+        state.snapshot.bookmarks = positionOptimistically(
+          state.snapshot.bookmarks,
+          moveCommand.bookmarkId,
+          (bookmark) => bookmark.folderId === moveCommand.destinationFolderId,
+          (bookmark) => ({ ...bookmark, folderId: moveCommand.destinationFolderId }),
+          moveCommand.beforeBookmarkId,
+        );
+      },
     });
   };
 
@@ -466,7 +535,16 @@ export const createBookmarkState = (adapters: {
           (item) => item.command.operationId !== command.operationId,
         );
         state.writeStatus = 'conflict';
-        state.writeMessage = 'The item changed elsewhere. Review the current authoritative data.';
+        state.writeMessage =
+          result.code === 'stale_sequence'
+            ? 'The order changed elsewhere. Authoritative ordering was restored.'
+            : result.code === 'folder_cycle'
+              ? 'A Folder cannot be moved into itself or its descendant.'
+              : result.code === 'folder_depth'
+                ? 'The move would exceed ten Folder levels.'
+                : result.code === 'name_conflict'
+                  ? 'The destination already has a Folder with that exact name.'
+                  : 'The item changed elsewhere. Review the current authoritative data.';
         emit();
         return result;
       }
@@ -487,6 +565,7 @@ export const createBookmarkState = (adapters: {
       await adapters.storage.removeUnconfirmedOperation?.(command.operationId);
       state.writeStatus = 'idle';
       state.writeMessage = null;
+      adapters.revisionChannel?.announce(result.revision);
       emit();
       return result;
     } catch (error) {
@@ -568,6 +647,13 @@ export const createBookmarkState = (adapters: {
     intervalHandle = lifecycle.setInterval(() => {
       if (lifecycle.isVisible() && lifecycle.isOnline()) void refresh();
     }, 60_000);
+    if (adapters.revisionChannel) {
+      lifecycleUnsubscribers.push(
+        adapters.revisionChannel.subscribe((revision) => {
+          if (revision > (state.snapshot?.revision ?? -1)) void refresh();
+        }),
+      );
+    }
   };
 
   return {
@@ -659,6 +745,7 @@ export const createBookmarkState = (adapters: {
       intervalHandle = undefined;
       for (const unsubscribe of lifecycleUnsubscribers.splice(0)) unsubscribe();
       adapters.search?.dispose();
+      adapters.revisionChannel?.close();
     },
   };
 };

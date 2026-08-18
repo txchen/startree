@@ -153,11 +153,59 @@ export const editBookmarkCommandSchema = v.object({
   tags: bookmarkTagsInputSchema,
 });
 
+export const reorderFolderCommandSchema = v.object({
+  ...commandBase,
+  type: v.literal('reorderFolder'),
+  folderId: identifierSchema,
+  folderVersion: entityVersionSchema,
+  parentId: identifierSchema,
+  expectedFolderSequenceVersion: entityVersionSchema,
+  beforeFolderId: v.optional(identifierSchema),
+});
+
+export const moveFolderCommandSchema = v.object({
+  ...commandBase,
+  type: v.literal('moveFolder'),
+  folderId: identifierSchema,
+  folderVersion: entityVersionSchema,
+  sourceParentId: identifierSchema,
+  destinationFolderId: identifierSchema,
+  expectedSourceFolderSequenceVersion: entityVersionSchema,
+  expectedDestinationFolderSequenceVersion: entityVersionSchema,
+  beforeFolderId: v.optional(identifierSchema),
+});
+
+export const reorderBookmarkCommandSchema = v.object({
+  ...commandBase,
+  type: v.literal('reorderBookmark'),
+  bookmarkId: identifierSchema,
+  bookmarkVersion: entityVersionSchema,
+  folderId: identifierSchema,
+  expectedBookmarkSequenceVersion: entityVersionSchema,
+  beforeBookmarkId: v.optional(identifierSchema),
+});
+
+export const moveBookmarkCommandSchema = v.object({
+  ...commandBase,
+  type: v.literal('moveBookmark'),
+  bookmarkId: identifierSchema,
+  bookmarkVersion: entityVersionSchema,
+  sourceFolderId: identifierSchema,
+  destinationFolderId: identifierSchema,
+  expectedSourceBookmarkSequenceVersion: entityVersionSchema,
+  expectedDestinationBookmarkSequenceVersion: entityVersionSchema,
+  beforeBookmarkId: v.optional(identifierSchema),
+});
+
 export const bookmarkCommandSchema = v.variant('type', [
   createFolderCommandSchema,
   editFolderCommandSchema,
   createBookmarkCommandSchema,
   editBookmarkCommandSchema,
+  reorderFolderCommandSchema,
+  moveFolderCommandSchema,
+  reorderBookmarkCommandSchema,
+  moveBookmarkCommandSchema,
 ]);
 
 const commandRecords = {
@@ -177,7 +225,15 @@ export const bookmarkCommandResultSchema = v.variant('status', [
   v.object({
     status: v.literal('conflict'),
     operationId: uuidV4Schema,
-    code: v.picklist(['stale_entity', 'stale_sequence', 'name_conflict', 'missing_entity']),
+    code: v.picklist([
+      'stale_entity',
+      'stale_sequence',
+      'name_conflict',
+      'missing_entity',
+      'invalid_position',
+      'folder_cycle',
+      'folder_depth',
+    ]),
     ...commandRecords,
   }),
 ]);
@@ -202,6 +258,14 @@ export const visitBookmarkCommand = <Result>(
       return handlers.createBookmark(command);
     case 'editBookmark':
       return handlers.editBookmark(command);
+    case 'reorderFolder':
+      return handlers.reorderFolder(command);
+    case 'moveFolder':
+      return handlers.moveFolder(command);
+    case 'reorderBookmark':
+      return handlers.reorderBookmark(command);
+    case 'moveBookmark':
+      return handlers.moveBookmark(command);
   }
 };
 

@@ -13,6 +13,7 @@ export default defineConfig({
       manifest: false,
       injectManifest: {
         globPatterns: ['**/*.{html,js,css,svg,png,ico,woff2}'],
+        rollupFormat: 'iife',
       },
     }),
   ],

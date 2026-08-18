@@ -127,6 +127,45 @@ describe('Bookmark command contract', () => {
     );
   });
 
+  it.each([
+    {
+      type: 'reorderFolder',
+      folderId: '10000000-0000-4000-8000-000000000001',
+      folderVersion: 1,
+      parentId: SYSTEM_ROOT_FOLDER_ID,
+      expectedFolderSequenceVersion: 2,
+      beforeFolderId: '10000000-0000-4000-8000-000000000002',
+    },
+    {
+      type: 'moveFolder',
+      folderId: '10000000-0000-4000-8000-000000000001',
+      folderVersion: 1,
+      sourceParentId: SYSTEM_ROOT_FOLDER_ID,
+      destinationFolderId: '10000000-0000-4000-8000-000000000002',
+      expectedSourceFolderSequenceVersion: 2,
+      expectedDestinationFolderSequenceVersion: 3,
+    },
+    {
+      type: 'reorderBookmark',
+      bookmarkId: '20000000-0000-4000-8000-000000000001',
+      bookmarkVersion: 1,
+      folderId: SYSTEM_ROOT_FOLDER_ID,
+      expectedBookmarkSequenceVersion: 2,
+    },
+    {
+      type: 'moveBookmark',
+      bookmarkId: '20000000-0000-4000-8000-000000000001',
+      bookmarkVersion: 1,
+      sourceFolderId: SYSTEM_ROOT_FOLDER_ID,
+      destinationFolderId: '10000000-0000-4000-8000-000000000002',
+      expectedSourceBookmarkSequenceVersion: 2,
+      expectedDestinationBookmarkSequenceVersion: 3,
+      beforeBookmarkId: '20000000-0000-4000-8000-000000000002',
+    },
+  ])('accepts the $type organization command contract', (command) => {
+    expect(v.safeParse(bookmarkCommandSchema, { ...command, operationId }).success).toBe(true);
+  });
+
   it('preserves Folder names and rejects blank values', () => {
     const command = {
       type: 'createFolder' as const,

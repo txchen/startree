@@ -7,7 +7,11 @@ import type { Bookmark, BookmarkCommand, BookmarkFolder } from '../../shared/boo
 import BookmarkCard from './BookmarkCard.vue';
 import BookmarkEditorModal from './BookmarkEditorModal.vue';
 import type { BookmarkEditorValue } from './bookmark-editor';
-import { createFetchBookmarkAdapter, createIndexedDbBookmarkAdapter } from './bookmark-adapters';
+import {
+  createBroadcastBookmarkRevisionChannel,
+  createFetchBookmarkAdapter,
+  createIndexedDbBookmarkAdapter,
+} from './bookmark-adapters';
 import { createWorkerBookmarkSearchAdapter } from './bookmark-search';
 import { createBookmarkState, type BookmarkStateView } from './bookmark-state';
 import FolderNavigation from './FolderNavigation.vue';
@@ -27,10 +31,15 @@ const editorDraft = ref<BookmarkEditorValue>({});
 const editorInitialValue = ref<BookmarkEditorValue>({});
 const desktopEditingAvailable = ref(false);
 const editMode = ref(false);
+const dragged = ref<{ kind: 'folder' | 'bookmark'; id: string } | null>(null);
+const moveEditor = ref<{ kind: 'folder' | 'bookmark'; id: string } | null>(null);
+const moveDestinationId = ref(SYSTEM_ROOT_FOLDER_ID);
+const moveBeforeId = ref('');
 const stateModule = createBookmarkState({
   remote: createFetchBookmarkAdapter(),
   storage: createIndexedDbBookmarkAdapter(),
   search: createWorkerBookmarkSearchAdapter(),
+  revisionChannel: createBroadcastBookmarkRevisionChannel(),
 });
 const state = shallowRef<BookmarkStateView>(stateModule.getState());
 let unsubscribe: (() => void) | undefined;
@@ -141,6 +150,138 @@ const selectedSequence = computed(() =>
     ? state.value.sequences.find((sequence) => sequence.folderId === state.value.selectedFolder?.id)
     : undefined,
 );
+
+const sequenceFor = (folderId: string) =>
+  state.value.sequences.find((sequence) => sequence.folderId === folderId);
+
+const reorderFolder = async (folderId: string, beforeFolderId?: string) => {
+  const folder = state.value.folders.find((item) => item.id === folderId);
+  const parent = state.value.selectedFolder;
+  const sequence = parent ? sequenceFor(parent.id) : undefined;
+  if (!folder || !parent || !sequence || folder.id === beforeFolderId) return;
+  await stateModule.executeCommand({
+    type: 'reorderFolder',
+    operationId: crypto.randomUUID(),
+    folderId: folder.id,
+    folderVersion: folder.version,
+    parentId: parent.id,
+    expectedFolderSequenceVersion: sequence.folderVersion,
+    ...(beforeFolderId ? { beforeFolderId } : {}),
+  });
+};
+
+const reorderBookmark = async (bookmarkId: string, beforeBookmarkId?: string) => {
+  const bookmark = state.value.directBookmarks.find((item) => item.id === bookmarkId);
+  const parent = state.value.selectedFolder;
+  const sequence = parent ? sequenceFor(parent.id) : undefined;
+  if (!bookmark || !parent || !sequence || bookmark.id === beforeBookmarkId) return;
+  await stateModule.executeCommand({
+    type: 'reorderBookmark',
+    operationId: crypto.randomUUID(),
+    bookmarkId: bookmark.id,
+    bookmarkVersion: bookmark.version,
+    folderId: parent.id,
+    expectedBookmarkSequenceVersion: sequence.bookmarkVersion,
+    ...(beforeBookmarkId ? { beforeBookmarkId } : {}),
+  });
+};
+
+const dropFolder = async (beforeFolderId?: string) => {
+  const active = dragged.value;
+  dragged.value = null;
+  if (active?.kind === 'folder') await reorderFolder(active.id, beforeFolderId);
+};
+
+const dropBookmark = async (beforeBookmarkId?: string) => {
+  const active = dragged.value;
+  dragged.value = null;
+  if (active?.kind === 'bookmark') await reorderBookmark(active.id, beforeBookmarkId);
+};
+
+const openMoveEditor = (kind: 'folder' | 'bookmark', id: string) => {
+  moveEditor.value = { kind, id };
+  moveDestinationId.value = state.value.selectedFolder?.id ?? SYSTEM_ROOT_FOLDER_ID;
+  moveBeforeId.value = '';
+};
+
+const folderIsWithin = (candidateId: string, ancestorId: string): boolean => {
+  let cursor = state.value.folders.find((folder) => folder.id === candidateId);
+  while (cursor?.parentId) {
+    if (cursor.parentId === ancestorId) return true;
+    cursor = state.value.folders.find((folder) => folder.id === cursor?.parentId);
+  }
+  return false;
+};
+
+const executeFolderMove = async (folderId: string) => {
+  const folder = state.value.folders.find((item) => item.id === folderId);
+  if (!folder?.parentId || folder.parentId === moveDestinationId.value) return null;
+  const source = sequenceFor(folder.parentId);
+  const destination = sequenceFor(moveDestinationId.value);
+  if (!source || !destination) return null;
+  return stateModule.executeCommand({
+    type: 'moveFolder',
+    operationId: crypto.randomUUID(),
+    folderId: folder.id,
+    folderVersion: folder.version,
+    sourceParentId: folder.parentId,
+    destinationFolderId: moveDestinationId.value,
+    expectedSourceFolderSequenceVersion: source.folderVersion,
+    expectedDestinationFolderSequenceVersion: destination.folderVersion,
+    ...(moveBeforeId.value ? { beforeFolderId: moveBeforeId.value } : {}),
+  });
+};
+
+const executeBookmarkMove = async (bookmarkId: string) => {
+  const bookmark = state.value.bookmarks.find((item) => item.id === bookmarkId);
+  if (!bookmark || bookmark.folderId === moveDestinationId.value) return null;
+  const source = sequenceFor(bookmark.folderId);
+  const destination = sequenceFor(moveDestinationId.value);
+  if (!source || !destination) return null;
+  return stateModule.executeCommand({
+    type: 'moveBookmark',
+    operationId: crypto.randomUUID(),
+    bookmarkId: bookmark.id,
+    bookmarkVersion: bookmark.version,
+    sourceFolderId: bookmark.folderId,
+    destinationFolderId: moveDestinationId.value,
+    expectedSourceBookmarkSequenceVersion: source.bookmarkVersion,
+    expectedDestinationBookmarkSequenceVersion: destination.bookmarkVersion,
+    ...(moveBeforeId.value ? { beforeBookmarkId: moveBeforeId.value } : {}),
+  });
+};
+
+const moveEditorModel = computed(() => {
+  const active = moveEditor.value;
+  if (!active) return null;
+  if (active.kind === 'folder') {
+    return {
+      noun: 'Folder',
+      destinations: state.value.folders.filter(
+        (folder) => folder.id !== active.id && !folderIsWithin(folder.id, active.id),
+      ),
+      positions: state.value.folders
+        .filter((folder) => folder.parentId === moveDestinationId.value && folder.id !== active.id)
+        .map((folder) => ({ id: folder.id, label: folder.name })),
+      execute: () => executeFolderMove(active.id),
+    };
+  }
+  return {
+    noun: 'Bookmark',
+    destinations: state.value.folders,
+    positions: state.value.bookmarks
+      .filter(
+        (bookmark) => bookmark.folderId === moveDestinationId.value && bookmark.id !== active.id,
+      )
+      .map((bookmark) => ({ id: bookmark.id, label: bookmark.title })),
+    execute: () => executeBookmarkMove(active.id),
+  };
+});
+
+const saveMove = async () => {
+  const result = await moveEditorModel.value?.execute();
+  if (result?.status === 'acknowledged') moveEditor.value = null;
+};
 
 const copyEditorValue = (value: BookmarkEditorValue): BookmarkEditorValue => ({
   ...value,
@@ -482,7 +623,23 @@ onUnmounted(() => {
         >
           <h2 id="folders-title">Folders</h2>
           <div class="folder-grid">
-            <div v-for="folder in state.directFolders" :key="folder.id" class="folder-tile">
+            <div
+              v-for="folder in state.directFolders"
+              :key="folder.id"
+              class="folder-tile"
+              :draggable="editingAvailable && editMode"
+              @dragstart="dragged = { kind: 'folder', id: folder.id }"
+              @dragover="editingAvailable && editMode && $event.preventDefault()"
+              @drop="
+                editingAvailable && editMode && (dropFolder(folder.id), $event.preventDefault())
+              "
+            >
+              <span
+                v-if="editingAvailable && editMode"
+                class="drag-handle desktop-edit-controls"
+                aria-label="Drag Folder"
+                >⋮⋮</span
+              >
               <button type="button" @click="navigateToFolder(folder.id)">
                 <span class="folder-icon" aria-hidden="true">⌑</span>
                 <span>{{ folder.name }}</span>
@@ -497,6 +654,26 @@ onUnmounted(() => {
               >
                 Edit
               </button>
+              <button
+                v-if="editingAvailable && editMode"
+                class="tile-move desktop-edit-controls"
+                type="button"
+                :aria-label="`Move ${folder.name}`"
+                @click="openMoveEditor('folder', folder.id)"
+              >
+                Move
+              </button>
+            </div>
+            <div
+              v-if="editingAvailable && editMode"
+              class="drop-at-end desktop-edit-controls"
+              @dragover.prevent
+              @drop="
+                dropFolder();
+                $event.preventDefault();
+              "
+            >
+              Drop to place last
             </div>
           </div>
         </section>
@@ -515,7 +692,21 @@ onUnmounted(() => {
               :tags="state.tagsByBookmark[bookmark.id] ?? []"
               :editable="editingAvailable && editMode"
               @edit="openBookmarkEditor(bookmark)"
+              @move="openMoveEditor('bookmark', bookmark.id)"
+              @dragstart="dragged = { kind: 'bookmark', id: bookmark.id }"
+              @drop="dropBookmark(bookmark.id)"
             />
+            <div
+              v-if="editingAvailable && editMode"
+              class="drop-at-end desktop-edit-controls"
+              @dragover.prevent
+              @drop="
+                dropBookmark();
+                $event.preventDefault();
+              "
+            >
+              Drop to place last
+            </div>
           </div>
         </section>
 
@@ -573,5 +764,40 @@ onUnmounted(() => {
       @draft="editorDraft = $event"
       @save="saveEditor"
     />
+
+    <div
+      v-if="moveEditor && editingAvailable && editMode"
+      class="move-backdrop"
+      @click.self="moveEditor = null"
+    >
+      <div class="move-dialog" role="dialog" aria-modal="true" aria-labelledby="move-title">
+        <h2 id="move-title">Move {{ moveEditorModel?.noun }}</h2>
+        <label>
+          Destination Folder
+          <select v-model="moveDestinationId" @change="moveBeforeId = ''">
+            <option
+              v-for="folder in moveEditorModel?.destinations"
+              :key="folder.id"
+              :value="folder.id"
+            >
+              {{ folder.name || 'Bookmarks' }}
+            </option>
+          </select>
+        </label>
+        <label>
+          Position
+          <select v-model="moveBeforeId">
+            <option value="">Append after existing items</option>
+            <option v-for="item in moveEditorModel?.positions" :key="item.id" :value="item.id">
+              Before {{ item.label }}
+            </option>
+          </select>
+        </label>
+        <div class="move-dialog-actions">
+          <button type="button" @click="moveEditor = null">Cancel</button>
+          <button type="button" @click="saveMove">Move</button>
+        </div>
+      </div>
+    </div>
   </section>
 </template>

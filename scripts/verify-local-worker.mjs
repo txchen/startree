@@ -255,6 +255,74 @@ try {
     await page.unrouteAll({ behavior: 'wait' });
     await page.getByRole('button', { name: 'Retry same operation' }).click();
     await page.getByText('The save result is unknown.').waitFor({ state: 'detached' });
+
+    const articlesTile = page.locator('.folder-tile', { hasText: 'Articles' });
+    const uiFolderTile = page.locator('.folder-tile', { hasText: 'UI Folder Renamed' });
+    await uiFolderTile.dragTo(articlesTile);
+    await page.waitForFunction(() =>
+      [...document.querySelectorAll('.folder-tile')][0]?.textContent?.includes('UI Folder Renamed'),
+    );
+
+    await page.route('**/api/bookmarks/commands', async (route) => {
+      const staleCommand = route.request().postDataJSON();
+      if (staleCommand.type !== 'reorderFolder') {
+        await route.continue();
+        return;
+      }
+      const concurrentSnapshot = await fetch(
+        `http://127.0.0.1:${port}/api/bookmarks/snapshot`,
+      ).then((response) => response.json());
+      const concurrentlyMovedFolder = concurrentSnapshot.folders.find(
+        (folder) => folder.name === 'UI Folder Renamed',
+      );
+      const concurrentResponse = await fetch(`http://127.0.0.1:${port}/api/bookmarks/commands`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Origin: `http://127.0.0.1:${port}` },
+        body: JSON.stringify({
+          ...staleCommand,
+          operationId: crypto.randomUUID(),
+          folderId: concurrentlyMovedFolder.id,
+          folderVersion: concurrentlyMovedFolder.version,
+          beforeFolderId: undefined,
+        }),
+      });
+      if (!concurrentResponse.ok) {
+        throw new Error(`Concurrent reorder fixture failed with ${concurrentResponse.status}.`);
+      }
+      await route.continue();
+    });
+    await articlesTile.dragTo(uiFolderTile);
+    await page
+      .getByText('The order changed elsewhere. Authoritative ordering was restored.')
+      .waitFor();
+    await page.waitForFunction(() =>
+      [...document.querySelectorAll('.folder-tile')][0]?.textContent?.includes('Articles'),
+    );
+    await page.unrouteAll({ behavior: 'wait' });
+
+    await page.getByRole('button', { name: 'Move UI Folder Renamed' }).click();
+    await page
+      .getByLabel('Destination Folder')
+      .selectOption('10000000-0000-4000-8000-000000000003');
+    await page.locator('.move-dialog').getByRole('button', { name: 'Move' }).click();
+    await uiFolderTile.waitFor({ state: 'detached' });
+
+    await page.getByRole('button', { name: 'Move Authoritative Bookmark' }).click();
+    await page
+      .getByLabel('Destination Folder')
+      .selectOption('10000000-0000-4000-8000-000000000003');
+    await page.locator('.move-dialog').getByRole('button', { name: 'Move' }).click();
+    await page.getByRole('link', { name: /Authoritative Bookmark/ }).waitFor({ state: 'detached' });
+
+    await page.locator('.folder-tile button').filter({ hasText: 'Articles' }).click();
+    await page.getByRole('heading', { level: 1, name: 'Articles' }).waitFor();
+    await page.getByText('UI Folder Renamed', { exact: true }).waitFor();
+    await page.getByRole('link', { name: /Authoritative Bookmark/ }).waitFor();
+    await page.goBack();
+    await page.getByRole('heading', { level: 1, name: 'Reading' }).waitFor();
+    await page.goForward();
+    await page.getByRole('heading', { level: 1, name: 'Articles' }).waitFor();
+    await page.goBack();
     await page.getByRole('button', { name: 'Done' }).click();
     if (await page.getByRole('button', { name: 'New Folder' }).count()) {
       throw new Error('Done did not return the desktop Bookmarks Page to Browse Mode.');
@@ -432,7 +500,7 @@ try {
   }
 
   console.log(
-    'Local Worker passed D1-backed API, search, keyboard, offline, and refresh-degradation verification.',
+    'Local Worker passed D1-backed API, organization, search, keyboard, offline, and refresh-degradation verification.',
   );
 } finally {
   worker.kill('SIGTERM');

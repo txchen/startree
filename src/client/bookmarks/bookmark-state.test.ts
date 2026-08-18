@@ -502,6 +502,125 @@ describe('Bookmark state Module Interface', () => {
     state.dispose();
   });
 
+  it('optimistically moves a record and rolls back a rejected organization command', async () => {
+    let rejectMove: ((reason: Error) => void) | undefined;
+    const remote = createMemoryBookmarkRemoteAdapter(snapshot());
+    remote.executeCommand = () =>
+      new Promise((_resolve, reject) => {
+        rejectMove = reject;
+      });
+    const state = createBookmarkState({
+      remote,
+      storage: createMemoryBookmarkStorageAdapter(),
+      lifecycle: createMemoryBookmarkLifecycleAdapter(),
+    });
+    await state.initialize({ folderId });
+
+    const move = state.executeCommand({
+      type: 'moveBookmark',
+      operationId: 'aa000000-0000-4000-8000-000000000001',
+      bookmarkId: '20000000-0000-4000-8000-000000000001',
+      bookmarkVersion: 1,
+      sourceFolderId: folderId,
+      destinationFolderId: childAId,
+      expectedSourceBookmarkSequenceVersion: 1,
+      expectedDestinationBookmarkSequenceVersion: 1,
+    });
+    expect(state.getState().directBookmarks.map((bookmark) => bookmark.title)).toEqual([
+      'Later Bookmark',
+    ]);
+    rejectMove?.(new Error('rejected'));
+    await move;
+
+    expect(state.getState().directBookmarks.map((bookmark) => bookmark.title)).toEqual([
+      'Now Bookmark',
+      'Later Bookmark',
+    ]);
+    expect(state.getState().writeStatus).toBe('failed');
+    state.dispose();
+  });
+
+  it('optimistically reorders records and merges the authoritative organization result', async () => {
+    let settle:
+      | ((value: import('../../shared/bookmarks/contracts').BookmarkCommandResult) => void)
+      | undefined;
+    const remote = createMemoryBookmarkRemoteAdapter(snapshot());
+    remote.executeCommand = () =>
+      new Promise((resolve) => {
+        settle = resolve;
+      });
+    const state = createBookmarkState({
+      remote,
+      storage: createMemoryBookmarkStorageAdapter(),
+      lifecycle: createMemoryBookmarkLifecycleAdapter(),
+    });
+    await state.initialize({ folderId });
+    const command = {
+      type: 'reorderFolder' as const,
+      operationId: 'aa000000-0000-4000-8000-000000000002',
+      folderId: childBId,
+      folderVersion: 1,
+      parentId: folderId,
+      expectedFolderSequenceVersion: 1,
+      beforeFolderId: childAId,
+    };
+
+    const reorder = state.executeCommand(command);
+    expect(state.getState().directFolders.map((folder) => folder.name)).toEqual(['Later', 'Now']);
+    settle?.({
+      status: 'acknowledged',
+      operationId: command.operationId,
+      revision: 2,
+      folders: [
+        { ...snapshot().folders[2]!, rank: 'a', version: 2 },
+        { ...snapshot().folders[3]!, rank: 'b' },
+      ],
+      bookmarks: [],
+      tags: [],
+      sequences: [{ folderId, folderVersion: 2, bookmarkVersion: 1 }],
+    });
+    await reorder;
+
+    expect(state.getState()).toMatchObject({ writeStatus: 'idle', snapshotRevision: 2 });
+    expect(state.getState().directFolders.map((folder) => folder.name)).toEqual(['Later', 'Now']);
+    state.dispose();
+  });
+
+  it('conditionally refreshes when another tab announces a newer revision', async () => {
+    let receive: ((revision: number) => void) | undefined;
+    const remote = createMemoryBookmarkRemoteAdapter(snapshot());
+    const revisionChannel = {
+      announce: vi.fn(),
+      subscribe(listener: (revision: number) => void) {
+        receive = listener;
+        return () => {
+          receive = undefined;
+        };
+      },
+      close: vi.fn(),
+    };
+    const state = createBookmarkState({
+      remote,
+      storage: createMemoryBookmarkStorageAdapter(),
+      lifecycle: createMemoryBookmarkLifecycleAdapter(),
+      revisionChannel,
+    });
+    await state.initialize({ folderId });
+    const replacement = snapshot(2);
+    replacement.folders[1] = { ...replacement.folders[1]!, name: 'Cross-tab' };
+    remote.setSnapshot(replacement);
+
+    receive?.(1);
+    await Promise.resolve();
+    expect(remote.requestedRevisions).toEqual([null]);
+    receive?.(2);
+    await vi.waitFor(() => expect(state.getState().snapshotRevision).toBe(2));
+
+    expect(state.getState().selectedFolder?.name).toBe('Cross-tab');
+    state.dispose();
+    expect(revisionChannel.close).toHaveBeenCalledOnce();
+  });
+
   it('records unknown outcomes and refreshes before an explicit same-ID retry', async () => {
     const storage = createMemoryBookmarkStorageAdapter();
     const remote = createMemoryBookmarkRemoteAdapter(snapshot());

@@ -477,4 +477,311 @@ describe('Bookmark Service Interface', () => {
       expect.objectContaining({ name: 'Concurrent', version: 2 }),
     );
   });
+
+  it('reorders independent sequences and moves Folder subtrees and Bookmarks at explicit positions', async () => {
+    const folderA = '81000000-0000-4000-8000-000000000001';
+    const folderB = '81000000-0000-4000-8000-000000000002';
+    const destination = '81000000-0000-4000-8000-000000000003';
+    const destinationChild = '81000000-0000-4000-8000-000000000004';
+    const bookmarkA = '82000000-0000-4000-8000-000000000001';
+    const bookmarkB = '82000000-0000-4000-8000-000000000002';
+    const destinationBookmark = '82000000-0000-4000-8000-000000000003';
+    await database.batch([
+      ...[
+        [folderA, 'A', 'a'],
+        [folderB, 'B', 'b'],
+        [destination, 'Destination', 'c'],
+      ].flatMap(([id, name, rank]) => [
+        database
+          .prepare(
+            `INSERT INTO bookmark_folders
+              (id, name, parent_id, rank, created_at, modified_at, version)
+             VALUES (?, ?, ?, ?, ?, ?, 1)`,
+          )
+          .bind(id, name, SYSTEM_ROOT_FOLDER_ID, rank, now, now),
+        database
+          .prepare(
+            "INSERT INTO bookmark_sequences (folder_id, kind, version) VALUES (?, 'folders', 1)",
+          )
+          .bind(id),
+        database
+          .prepare(
+            "INSERT INTO bookmark_sequences (folder_id, kind, version) VALUES (?, 'bookmarks', 1)",
+          )
+          .bind(id),
+      ]),
+      database
+        .prepare(
+          `INSERT INTO bookmark_folders
+            (id, name, parent_id, rank, created_at, modified_at, version)
+           VALUES (?, 'Destination Child', ?, 'a', ?, ?, 1)`,
+        )
+        .bind(destinationChild, destination, now, now),
+      database
+        .prepare(
+          "INSERT INTO bookmark_sequences (folder_id, kind, version) VALUES (?, 'folders', 1)",
+        )
+        .bind(destinationChild),
+      database
+        .prepare(
+          "INSERT INTO bookmark_sequences (folder_id, kind, version) VALUES (?, 'bookmarks', 1)",
+        )
+        .bind(destinationChild),
+      ...[
+        [bookmarkA, SYSTEM_ROOT_FOLDER_ID, 'A Bookmark', 'a'],
+        [bookmarkB, SYSTEM_ROOT_FOLDER_ID, 'B Bookmark', 'b'],
+        [destinationBookmark, destination, 'Destination Bookmark', 'a'],
+      ].map(([id, folderId, title, rank]) =>
+        database
+          .prepare(
+            `INSERT INTO bookmarks
+              (id, folder_id, url, title, note, rank, created_at, modified_at, version)
+             VALUES (?, ?, 'https://example.com', ?, '', ?, ?, ?, 1)`,
+          )
+          .bind(id, folderId, title, rank, now, now),
+      ),
+    ]);
+    const service = createBookmarkService(database, { now: () => new Date(now) });
+
+    await service.executeCommand({
+      type: 'reorderFolder',
+      operationId: 'b0000000-0000-4000-8000-000000000001',
+      folderId: folderB,
+      folderVersion: 1,
+      parentId: SYSTEM_ROOT_FOLDER_ID,
+      expectedFolderSequenceVersion: 1,
+      beforeFolderId: folderA,
+    });
+    await service.executeCommand({
+      type: 'moveFolder',
+      operationId: 'b0000000-0000-4000-8000-000000000002',
+      folderId: folderA,
+      folderVersion: 1,
+      sourceParentId: SYSTEM_ROOT_FOLDER_ID,
+      destinationFolderId: destination,
+      expectedSourceFolderSequenceVersion: 2,
+      expectedDestinationFolderSequenceVersion: 1,
+    });
+    const movedBookmark = await service.executeCommand({
+      type: 'moveBookmark',
+      operationId: 'b0000000-0000-4000-8000-000000000003',
+      bookmarkId: bookmarkB,
+      bookmarkVersion: 1,
+      sourceFolderId: SYSTEM_ROOT_FOLDER_ID,
+      destinationFolderId: destination,
+      expectedSourceBookmarkSequenceVersion: 1,
+      expectedDestinationBookmarkSequenceVersion: 1,
+      beforeBookmarkId: destinationBookmark,
+    });
+
+    const snapshot = await service.getSnapshot();
+    expect(
+      snapshot.folders
+        .filter((folder) => folder.parentId === SYSTEM_ROOT_FOLDER_ID)
+        .map((folder) => folder.name),
+    ).toEqual(['B', 'Destination']);
+    expect(snapshot.folders.find((folder) => folder.id === folderA)).toMatchObject({
+      parentId: destination,
+      version: 2,
+    });
+    expect(
+      snapshot.folders
+        .filter((folder) => folder.parentId === destination)
+        .map((folder) => folder.name),
+    ).toEqual(['Destination Child', 'A']);
+    expect(
+      snapshot.bookmarks
+        .filter((bookmark) => bookmark.folderId === destination)
+        .map((bookmark) => bookmark.title),
+    ).toEqual(['B Bookmark', 'Destination Bookmark']);
+    expect(movedBookmark).toMatchObject({
+      status: 'acknowledged',
+      sequences: [
+        { folderId: SYSTEM_ROOT_FOLDER_ID, bookmarkVersion: 2 },
+        { folderId: destination, bookmarkVersion: 2 },
+      ],
+    });
+  });
+
+  it('rejects Folder cycles, excessive depth, and destination name conflicts atomically', async () => {
+    const ids = Array.from(
+      { length: 11 },
+      (_, index) => `83000000-0000-4000-8000-${(index + 1).toString().padStart(12, '0')}`,
+    );
+    const statements: D1PreparedStatement[] = [];
+    for (let index = 0; index < ids.length; index += 1) {
+      const parentId = index === 0 ? SYSTEM_ROOT_FOLDER_ID : ids[index - 1]!;
+      statements.push(
+        database
+          .prepare(
+            `INSERT INTO bookmark_folders
+              (id, name, parent_id, rank, created_at, modified_at, version)
+             VALUES (?, ?, ?, 'a', ?, ?, 1)`,
+          )
+          .bind(ids[index], index === 10 ? 'Conflict' : `Level ${index + 1}`, parentId, now, now),
+        database
+          .prepare(
+            "INSERT INTO bookmark_sequences (folder_id, kind, version) VALUES (?, 'folders', 1)",
+          )
+          .bind(ids[index]),
+        database
+          .prepare(
+            "INSERT INTO bookmark_sequences (folder_id, kind, version) VALUES (?, 'bookmarks', 1)",
+          )
+          .bind(ids[index]),
+      );
+    }
+    statements.push(
+      database
+        .prepare(
+          `INSERT INTO bookmark_folders (id, name, parent_id, rank, created_at, modified_at, version) VALUES ('83100000-0000-4000-8000-000000000001', 'Movable', ?, 'b', ?, ?, 1)`,
+        )
+        .bind(SYSTEM_ROOT_FOLDER_ID, now, now),
+      database
+        .prepare(
+          `INSERT INTO bookmark_folders (id, name, parent_id, rank, created_at, modified_at, version) VALUES ('83100000-0000-4000-8000-000000000002', 'Child', '83100000-0000-4000-8000-000000000001', 'a', ?, ?, 1)`,
+        )
+        .bind(now, now),
+      ...['83100000-0000-4000-8000-000000000001', '83100000-0000-4000-8000-000000000002'].flatMap(
+        (id) => [
+          database
+            .prepare(
+              "INSERT INTO bookmark_sequences (folder_id, kind, version) VALUES (?, 'folders', 1)",
+            )
+            .bind(id),
+          database
+            .prepare(
+              "INSERT INTO bookmark_sequences (folder_id, kind, version) VALUES (?, 'bookmarks', 1)",
+            )
+            .bind(id),
+        ],
+      ),
+    );
+    await database.batch(statements);
+    const service = createBookmarkService(database, { now: () => new Date(now) });
+
+    const cycle = await service.executeCommand({
+      type: 'moveFolder',
+      operationId: 'b1000000-0000-4000-8000-000000000001',
+      folderId: ids[0]!,
+      folderVersion: 1,
+      sourceParentId: SYSTEM_ROOT_FOLDER_ID,
+      destinationFolderId: ids[1]!,
+      expectedSourceFolderSequenceVersion: 1,
+      expectedDestinationFolderSequenceVersion: 1,
+    });
+    const depth = await service.executeCommand({
+      type: 'moveFolder',
+      operationId: 'b1000000-0000-4000-8000-000000000002',
+      folderId: '83100000-0000-4000-8000-000000000001',
+      folderVersion: 1,
+      sourceParentId: SYSTEM_ROOT_FOLDER_ID,
+      destinationFolderId: ids[8]!,
+      expectedSourceFolderSequenceVersion: 1,
+      expectedDestinationFolderSequenceVersion: 1,
+    });
+    await database
+      .prepare(
+        `INSERT INTO bookmark_folders
+          (id, name, parent_id, rank, created_at, modified_at, version)
+         VALUES ('84000000-0000-4000-8000-000000000001', 'Conflict', ?, 'z', ?, ?, 1)`,
+      )
+      .bind(SYSTEM_ROOT_FOLDER_ID, now, now)
+      .run();
+    const nameConflict = await service.executeCommand({
+      type: 'moveFolder',
+      operationId: 'b1000000-0000-4000-8000-000000000003',
+      folderId: ids[10]!,
+      folderVersion: 1,
+      sourceParentId: ids[9]!,
+      destinationFolderId: SYSTEM_ROOT_FOLDER_ID,
+      expectedSourceFolderSequenceVersion: 1,
+      expectedDestinationFolderSequenceVersion: 1,
+    });
+
+    expect(cycle).toMatchObject({ status: 'conflict', code: 'folder_cycle' });
+    expect(depth).toMatchObject({ status: 'conflict', code: 'folder_depth' });
+    expect(nameConflict).toMatchObject({ status: 'conflict', code: 'name_conflict' });
+    expect((await service.getSnapshot()).revision).toBe(0);
+  });
+
+  it('rejects stale organization versions and rebalances exhausted rank space without visible reorder', async () => {
+    const first = '85000000-0000-4000-8000-000000000001';
+    const second = '85000000-0000-4000-8000-000000000002';
+    await database.batch([
+      ...[
+        [first, 'First', '0'],
+        [second, 'Second', '1'],
+      ].flatMap(([id, name, rank]) => [
+        database
+          .prepare(
+            `INSERT INTO bookmark_folders (id, name, parent_id, rank, created_at, modified_at, version) VALUES (?, ?, ?, ?, ?, ?, 1)`,
+          )
+          .bind(id, name, SYSTEM_ROOT_FOLDER_ID, rank, now, now),
+        database
+          .prepare(
+            "INSERT INTO bookmark_sequences (folder_id, kind, version) VALUES (?, 'folders', 1)",
+          )
+          .bind(id),
+        database
+          .prepare(
+            "INSERT INTO bookmark_sequences (folder_id, kind, version) VALUES (?, 'bookmarks', 1)",
+          )
+          .bind(id),
+      ]),
+      database
+        .prepare(
+          "UPDATE bookmark_sequences SET version = 4 WHERE folder_id = ? AND kind = 'folders'",
+        )
+        .bind(SYSTEM_ROOT_FOLDER_ID),
+    ]);
+    const service = createBookmarkService(database, { now: () => new Date(now) });
+    const staleEntity = await service.executeCommand({
+      type: 'reorderFolder',
+      operationId: 'b2000000-0000-4000-8000-000000000000',
+      folderId: second,
+      folderVersion: 99,
+      parentId: SYSTEM_ROOT_FOLDER_ID,
+      expectedFolderSequenceVersion: 4,
+      beforeFolderId: first,
+    });
+    const stale = await service.executeCommand({
+      type: 'reorderFolder',
+      operationId: 'b2000000-0000-4000-8000-000000000001',
+      folderId: second,
+      folderVersion: 1,
+      parentId: SYSTEM_ROOT_FOLDER_ID,
+      expectedFolderSequenceVersion: 3,
+      beforeFolderId: first,
+    });
+    const reordered = await service.executeCommand({
+      type: 'reorderFolder',
+      operationId: 'b2000000-0000-4000-8000-000000000002',
+      folderId: second,
+      folderVersion: 1,
+      parentId: SYSTEM_ROOT_FOLDER_ID,
+      expectedFolderSequenceVersion: 4,
+      beforeFolderId: first,
+    });
+    const snapshot = await service.getSnapshot();
+
+    expect(staleEntity).toMatchObject({ status: 'conflict', code: 'stale_entity', revision: 0 });
+    expect(stale).toMatchObject({ status: 'conflict', code: 'stale_sequence', revision: 0 });
+    expect(reordered).toMatchObject({
+      status: 'acknowledged',
+      folders: [{ id: second }, { id: first }],
+    });
+    expect(
+      snapshot.folders
+        .filter((folder) => folder.parentId === SYSTEM_ROOT_FOLDER_ID)
+        .map((folder) => folder.name),
+    ).toEqual(['Second', 'First']);
+    expect(
+      new Set(
+        snapshot.folders
+          .filter((folder) => [first, second].includes(folder.id))
+          .map((folder) => folder.rank),
+      ).size,
+    ).toBe(2);
+  });
 });

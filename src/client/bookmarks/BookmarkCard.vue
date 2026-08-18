@@ -8,7 +8,7 @@ const props = defineProps<{
   tags: readonly string[];
   editable: boolean;
 }>();
-const emit = defineEmits<{ edit: [] }>();
+const emit = defineEmits<{ edit: []; move: []; dragstart: []; drop: [] }>();
 
 const faviconFailed = ref(false);
 const destination = computed(() => new URL(props.bookmark.url));
@@ -22,7 +22,16 @@ const activate = (event: MouseEvent) => {
 </script>
 
 <template>
-  <article class="bookmark-card-shell">
+  <article
+    class="bookmark-card-shell"
+    :draggable="editable"
+    @dragstart="emit('dragstart')"
+    @dragover="editable && $event.preventDefault()"
+    @drop="editable && (emit('drop'), $event.preventDefault())"
+  >
+    <span v-if="editable" class="drag-handle desktop-edit-controls" aria-label="Drag Bookmark"
+      >⋮⋮</span
+    >
     <a class="bookmark-card" :href="bookmark.url" @click="activate">
       <span class="bookmark-favicon" aria-hidden="true">
         <img
@@ -51,6 +60,15 @@ const activate = (event: MouseEvent) => {
       @click="$emit('edit')"
     >
       Edit
+    </button>
+    <button
+      v-if="editable"
+      class="bookmark-move-button desktop-edit-controls"
+      type="button"
+      :aria-label="`Move ${bookmark.title}`"
+      @click="emit('move')"
+    >
+      Move
     </button>
   </article>
 </template>

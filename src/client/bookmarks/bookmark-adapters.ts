@@ -13,10 +13,33 @@ import { indexedDbRequest } from '../app/indexed-db';
 import { BOOKMARK_DATABASE_NAME } from '../app/local-data';
 import type {
   BookmarkNavigation,
+  BookmarkRevisionChannel,
   BookmarkRemoteAdapter,
   BookmarkStorageAdapter,
   StoredBookmarkSnapshot,
 } from './bookmark-state';
+
+export const createBroadcastBookmarkRevisionChannel = (
+  channel: BroadcastChannel = new BroadcastChannel('startree-bookmark-revisions'),
+): BookmarkRevisionChannel => ({
+  announce(revision) {
+    channel.postMessage({ revision });
+  },
+  subscribe(listener) {
+    const receive = (event: MessageEvent<unknown>) => {
+      const revision =
+        typeof event.data === 'object' && event.data !== null && 'revision' in event.data
+          ? (event.data as { revision?: unknown }).revision
+          : undefined;
+      if (typeof revision === 'number' && Number.isInteger(revision) && revision >= 0) {
+        listener(revision);
+      }
+    };
+    channel.addEventListener('message', receive);
+    return () => channel.removeEventListener('message', receive);
+  },
+  close: () => channel.close(),
+});
 
 const transactionComplete = (transaction: IDBTransaction): Promise<void> =>
   new Promise((resolve, reject) => {

@@ -508,6 +508,24 @@ h2 {
   position: relative;
 }
 
+.drag-handle {
+  position: absolute;
+  z-index: 2;
+  top: 8px;
+  left: 8px;
+  padding: 2px 5px;
+  border-radius: 5px;
+  color: #526359;
+  background: #f1eee7;
+  cursor: grab;
+  font-size: 0.75rem;
+}
+
+.folder-tile[draggable='true'],
+.bookmark-card-shell[draggable='true'] {
+  cursor: grab;
+}
+
 .folder-tile > button:first-child {
   width: 100%;
 }
@@ -529,6 +547,18 @@ h2 {
   position: absolute;
   top: 5px;
   right: 5px;
+  display: block;
+  padding: 4px 7px;
+  border: 0;
+  color: #526359;
+  background: #f1eee7;
+  font-size: 0.7rem;
+}
+
+.folder-grid .tile-move {
+  position: absolute;
+  right: 5px;
+  bottom: 5px;
   display: block;
   padding: 4px 7px;
   border: 0;
@@ -568,6 +598,29 @@ h2 {
   background: #f1eee7;
   cursor: pointer;
   font-size: 0.7rem;
+}
+
+.bookmark-move-button {
+  position: absolute;
+  right: 7px;
+  bottom: 7px;
+  padding: 4px 7px;
+  border: 0;
+  border-radius: 6px;
+  color: #526359;
+  background: #f1eee7;
+  cursor: pointer;
+  font-size: 0.7rem;
+}
+
+.drop-at-end {
+  display: grid;
+  min-height: 54px;
+  place-items: center;
+  border: 1px dashed #b8b0a4;
+  border-radius: 10px;
+  color: #657168;
+  font-size: 0.78rem;
 }
 
 .bookmark-card {
@@ -710,6 +763,42 @@ h2 {
   display: none;
 }
 
+.move-backdrop {
+  display: grid;
+  position: fixed;
+  z-index: 30;
+  inset: 0;
+  place-items: center;
+  padding: 24px;
+  background: rgb(31 34 30 / 52%);
+}
+
+.move-dialog {
+  width: min(430px, 100%);
+  padding: 26px;
+  border-radius: 14px;
+  background: #faf8f3;
+  box-shadow: 0 24px 60px rgb(0 0 0 / 25%);
+}
+
+.move-dialog label,
+.move-dialog select {
+  display: block;
+  width: 100%;
+}
+
+.move-dialog select {
+  margin-top: 8px;
+  padding: 10px;
+}
+
+.move-dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 22px;
+}
+
 .editor-backdrop {
   display: grid;
   position: fixed;
@@ -828,7 +917,8 @@ h2 {
   .privacy-status,
   .folder-sidebar,
   .desktop-edit-controls,
-  .editor-backdrop {
+  .editor-backdrop,
+  .move-backdrop {
     display: none;
   }
 
