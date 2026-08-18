@@ -1,10 +1,11 @@
 <script setup lang="ts">
-import { onMounted, onUnmounted, ref, shallowRef, watch } from 'vue';
+import { computed, nextTick, onMounted, onUnmounted, ref, shallowRef, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 
 import { SYSTEM_ROOT_FOLDER_ID } from '../../shared/bookmarks/contracts';
 import BookmarkCard from './BookmarkCard.vue';
 import { createFetchBookmarkAdapter, createIndexedDbBookmarkAdapter } from './bookmark-adapters';
+import { createWorkerBookmarkSearchAdapter } from './bookmark-search';
 import { createBookmarkState, type BookmarkStateView } from './bookmark-state';
 import FolderNavigation from './FolderNavigation.vue';
 
@@ -12,12 +13,22 @@ const route = useRoute();
 const router = useRouter();
 const drawerOpen = ref(false);
 const initialized = ref(false);
+const searchInput = ref<HTMLInputElement>();
+const selectedSearchResult = ref(0);
 const stateModule = createBookmarkState({
   remote: createFetchBookmarkAdapter(),
   storage: createIndexedDbBookmarkAdapter(),
+  search: createWorkerBookmarkSearchAdapter(),
 });
 const state = shallowRef<BookmarkStateView>(stateModule.getState());
 let unsubscribe: (() => void) | undefined;
+
+const searchOpen = computed(() => state.value.searchQuery.trim().length > 0);
+const selectedResultId = computed(() =>
+  state.value.searchResults[selectedSearchResult.value]
+    ? `search-result-${selectedSearchResult.value}`
+    : undefined,
+);
 
 const routeFolderId = (): string | undefined => {
   const value = route.params.pathMatch;
@@ -37,7 +48,71 @@ const toggleFolder = async (folderId: string) => {
   await stateModule.toggleFolderExpanded(folderId);
 };
 
+const updateSearch = async (event: Event) => {
+  selectedSearchResult.value = 0;
+  await stateModule.search((event.target as HTMLInputElement).value);
+};
+
+const closeSearch = async () => {
+  await stateModule.search('');
+  selectedSearchResult.value = 0;
+};
+
+const activateSearchResult = async () => {
+  const result = state.value.searchResults[selectedSearchResult.value];
+  if (!result) return;
+  if (result.kind === 'folder') {
+    await closeSearch();
+    await navigateToFolder(result.folderId);
+    return;
+  }
+  document
+    .querySelector<HTMLAnchorElement>(`#search-result-${selectedSearchResult.value}`)
+    ?.click();
+};
+
+const handleSearchKeydown = async (event: KeyboardEvent) => {
+  if (event.key === 'Escape') {
+    event.preventDefault();
+    await closeSearch();
+    return;
+  }
+  if (!state.value.searchResults.length) return;
+  if (event.key === 'ArrowDown') {
+    event.preventDefault();
+    selectedSearchResult.value =
+      (selectedSearchResult.value + 1) % state.value.searchResults.length;
+  } else if (event.key === 'ArrowUp') {
+    event.preventDefault();
+    selectedSearchResult.value =
+      (selectedSearchResult.value - 1 + state.value.searchResults.length) %
+      state.value.searchResults.length;
+  } else if (event.key === 'Enter') {
+    event.preventDefault();
+    await activateSearchResult();
+  }
+};
+
+const isFormControl = (target: EventTarget | null) =>
+  target instanceof HTMLElement &&
+  (target.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName));
+
+const handleGlobalKeydown = (event: KeyboardEvent) => {
+  const shortcut = event.key === '/' || ((event.metaKey || event.ctrlKey) && event.key === 'k');
+  if (!shortcut || isFormControl(event.target)) return;
+  event.preventDefault();
+  void nextTick(() => searchInput.value?.focus());
+};
+
+const formatSyncTime = (value: string | null) =>
+  value
+    ? new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' }).format(
+        new Date(value),
+      )
+    : 'Never';
+
 onMounted(async () => {
+  document.addEventListener('keydown', handleGlobalKeydown);
   unsubscribe = stateModule.subscribe((replacement) => {
     state.value = replacement;
     const selectedFolderId = replacement.selectedFolder?.id;
@@ -67,7 +142,11 @@ watch(
   },
 );
 
-onUnmounted(() => unsubscribe?.());
+onUnmounted(() => {
+  document.removeEventListener('keydown', handleGlobalKeydown);
+  unsubscribe?.();
+  stateModule.dispose();
+});
 </script>
 
 <template>
@@ -93,7 +172,98 @@ onUnmounted(() => unsubscribe?.());
     <div class="bookmarks-workspace">
       <p v-if="state.notice" class="navigation-notice" role="status">{{ state.notice }}</p>
 
-      <div v-if="state.status === 'loading'" class="library-state" aria-live="polite">
+      <div
+        v-if="state.syncStatus !== 'idle'"
+        class="sync-status"
+        :class="state.syncStatus"
+        role="status"
+      >
+        <span>
+          <strong v-if="state.syncStatus === 'syncing'">Synchronizing…</strong>
+          <strong v-else-if="state.syncStatus === 'slow'"
+            >Synchronization is taking too long.</strong
+          >
+          <strong v-else-if="state.syncStatus === 'failed'">Synchronization failed.</strong>
+          <strong v-else-if="state.snapshotRevision !== null"
+            >Offline — showing retained Bookmarks.</strong
+          >
+          <strong v-else>Offline — an online load is required.</strong>
+          <small>Last synchronized: {{ formatSyncTime(state.lastSuccessfulSyncAt) }}</small>
+        </span>
+        <button
+          v-if="state.syncStatus === 'slow' || state.syncStatus === 'failed'"
+          type="button"
+          @click="stateModule.refresh()"
+        >
+          Retry
+        </button>
+      </div>
+
+      <div class="bookmark-search">
+        <label for="bookmark-search-input">Search every Folder and Bookmark</label>
+        <div class="search-field">
+          <span aria-hidden="true">⌕</span>
+          <input
+            id="bookmark-search-input"
+            ref="searchInput"
+            type="search"
+            :value="state.searchQuery"
+            placeholder="Search titles, URLs, Tags, and Notes"
+            autocomplete="off"
+            role="combobox"
+            aria-controls="bookmark-search-results"
+            :aria-expanded="searchOpen"
+            :aria-activedescendant="selectedResultId"
+            @input="updateSearch"
+            @keydown="handleSearchKeydown"
+          />
+          <kbd>/</kbd>
+        </div>
+        <div v-if="searchOpen" id="bookmark-search-results" class="search-results">
+          <p v-if="!state.searchResults.length" class="search-empty">
+            No active Folders or Bookmarks match.
+          </p>
+          <ul v-else>
+            <li v-for="(result, index) in state.searchResults" :key="`${result.kind}:${result.id}`">
+              <button
+                v-if="result.kind === 'folder'"
+                :id="`search-result-${index}`"
+                type="button"
+                :class="{ selected: index === selectedSearchResult }"
+                @mouseenter="selectedSearchResult = index"
+                @click="closeSearch().then(() => navigateToFolder(result.folderId))"
+              >
+                <span aria-hidden="true">⌑</span>
+                <span
+                  ><strong>{{ result.title }}</strong
+                  ><small>{{ result.folderPath }}</small></span
+                >
+              </button>
+              <a
+                v-else
+                :id="`search-result-${index}`"
+                :href="result.url"
+                :class="{ selected: index === selectedSearchResult }"
+                @mouseenter="selectedSearchResult = index"
+              >
+                <span aria-hidden="true">↗</span>
+                <span
+                  ><strong>{{ result.title }}</strong
+                  ><small>{{ result.folderPath }}</small></span
+                >
+              </a>
+            </li>
+          </ul>
+        </div>
+      </div>
+
+      <div
+        v-if="state.status === 'loading' && !state.coldLoadProgressVisible"
+        class="cold-shell"
+        aria-hidden="true"
+      ></div>
+
+      <div v-else-if="state.status === 'loading'" class="library-state" aria-live="polite">
         <span class="state-mark" aria-hidden="true">⋯</span>
         <h1 id="bookmarks-title">Growing your library</h1>
         <p>Loading Bookmarks…</p>
@@ -102,7 +272,14 @@ onUnmounted(() => unsubscribe?.());
       <div v-else-if="state.status === 'error'" class="library-state">
         <span class="state-mark" aria-hidden="true">!</span>
         <h1 id="bookmarks-title">The library could not be loaded</h1>
-        <p>Check your connection and try again.</p>
+        <p v-if="state.syncStatus === 'offline'">
+          Go online once to retain this private library for offline reading.
+        </p>
+        <p v-else-if="state.retainedSnapshotCompatibility === 'incompatible'">
+          Retained data belongs to a different application format and was preserved without being
+          opened.
+        </p>
+        <p v-else>Check your connection and try again.</p>
         <button type="button" @click="stateModule.refresh()">Try again</button>
       </div>
 

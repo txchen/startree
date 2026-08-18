@@ -1,7 +1,26 @@
 <script setup lang="ts">
+import { ref } from 'vue';
 import { RouterLink, RouterView } from 'vue-router';
 
+import { createIndexedDbBookmarkAdapter } from '../bookmarks/bookmark-adapters';
+import { clearLocalApplicationData } from './local-data';
 import { pageRoutes } from './routes';
+
+const loggingOut = ref(false);
+
+const clearAndLogOut = async () => {
+  loggingOut.value = true;
+  try {
+    await clearLocalApplicationData({
+      clearIndexedDb: () => createIndexedDbBookmarkAdapter().clear(),
+      cacheStorage: caches,
+      serviceWorkerRegistrations: () => navigator.serviceWorker.getRegistrations(),
+    });
+    window.location.assign('/cdn-cgi/access/logout');
+  } finally {
+    loggingOut.value = false;
+  }
+};
 </script>
 
 <template>
@@ -21,7 +40,17 @@ import { pageRoutes } from './routes';
           {{ route.meta?.navLabel }}
         </RouterLink>
       </nav>
-      <span class="privacy-status"><span aria-hidden="true">●</span> Private</span>
+      <div class="session-actions">
+        <span class="privacy-status"><span aria-hidden="true">●</span> Private</span>
+        <button
+          type="button"
+          :disabled="loggingOut"
+          aria-label="Clear local data and log out"
+          @click="clearAndLogOut"
+        >
+          {{ loggingOut ? 'Clearing…' : 'Log out' }}
+        </button>
+      </div>
     </header>
     <main>
       <RouterView />

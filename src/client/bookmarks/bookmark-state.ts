@@ -1,5 +1,6 @@
 import type { Bookmark, BookmarkFolder, BookmarkSnapshot } from '../../shared/bookmarks/contracts';
 import { SYSTEM_ROOT_FOLDER_ID } from '../../shared/bookmarks/contracts';
+import type { BookmarkSearchAdapter, BookmarkSearchResult } from './bookmark-search';
 
 export type BookmarkNavigation = {
   selectedFolderId: string;
@@ -7,14 +8,31 @@ export type BookmarkNavigation = {
 };
 
 export type BookmarkRemoteAdapter = {
-  readSnapshot(revision: number | null): Promise<BookmarkSnapshot | null>;
+  readSnapshot(revision: number | null, signal?: AbortSignal): Promise<BookmarkSnapshot | null>;
 };
 
+export type StoredBookmarkSnapshot =
+  | { status: 'empty' }
+  | { status: 'compatible'; snapshot: BookmarkSnapshot; synchronizedAt: string | null }
+  | { status: 'incompatible'; wireFormatVersion: number | null };
+
 export type BookmarkStorageAdapter = {
-  readSnapshot(): Promise<BookmarkSnapshot | null>;
-  writeSnapshot(snapshot: BookmarkSnapshot): Promise<void>;
+  readSnapshot(): Promise<StoredBookmarkSnapshot>;
+  writeSnapshot(snapshot: BookmarkSnapshot, metadata: { synchronizedAt: string }): Promise<void>;
   readNavigation(): Promise<BookmarkNavigation | null>;
   writeNavigation(navigation: BookmarkNavigation): Promise<void>;
+  clear(): Promise<void>;
+};
+
+export type BookmarkLifecycleAdapter = {
+  now(): number;
+  setTimeout(callback: () => void, delay: number): unknown;
+  clearTimeout(handle: unknown): void;
+  setInterval(callback: () => void, delay: number): unknown;
+  clearInterval(handle: unknown): void;
+  isOnline(): boolean;
+  isVisible(): boolean;
+  subscribe(event: 'online' | 'offline' | 'visibilitychange', listener: () => void): () => void;
 };
 
 export type BookmarkStateView = Readonly<{
@@ -28,6 +46,12 @@ export type BookmarkStateView = Readonly<{
   tagsByBookmark: Readonly<Record<string, readonly string[]>>;
   expandedFolderIds: readonly string[];
   notice: string | null;
+  syncStatus: 'idle' | 'syncing' | 'slow' | 'failed' | 'offline';
+  lastSuccessfulSyncAt: string | null;
+  retainedSnapshotCompatibility: 'none' | 'compatible' | 'incompatible';
+  coldLoadProgressVisible: boolean;
+  searchQuery: string;
+  searchResults: readonly BookmarkSearchResult[];
 }>;
 
 export type BookmarkState = {
@@ -35,8 +59,11 @@ export type BookmarkState = {
   subscribe(listener: (state: BookmarkStateView) => void): () => void;
   initialize(options?: { folderId?: string }): Promise<void>;
   refresh(): Promise<void>;
+  refreshAfterMutation(): Promise<void>;
+  search(query: string): Promise<void>;
   selectFolder(folderId: string): Promise<boolean>;
   toggleFolderExpanded(folderId: string): Promise<void>;
+  dispose(): void;
 };
 
 type MutableState = {
@@ -45,7 +72,29 @@ type MutableState = {
   selectedFolderId: string;
   expandedFolderIds: string[];
   notice: string | null;
+  syncStatus: BookmarkStateView['syncStatus'];
+  lastSuccessfulSyncAt: string | null;
+  retainedSnapshotCompatibility: BookmarkStateView['retainedSnapshotCompatibility'];
+  searchQuery: string;
+  searchResults: BookmarkSearchResult[];
 };
+
+const createDefaultLifecycleAdapter = (): BookmarkLifecycleAdapter => ({
+  now: () => Date.now(),
+  setTimeout: (callback, delay) => globalThis.setTimeout(callback, delay),
+  clearTimeout: (handle) => globalThis.clearTimeout(handle as ReturnType<typeof setTimeout>),
+  setInterval: (callback, delay) => globalThis.setInterval(callback, delay),
+  clearInterval: (handle) => globalThis.clearInterval(handle as ReturnType<typeof setInterval>),
+  isOnline: () => (typeof navigator === 'undefined' ? true : navigator.onLine !== false),
+  isVisible: () =>
+    typeof document === 'undefined' ? true : document.visibilityState === 'visible',
+  subscribe(event, listener) {
+    if (typeof window === 'undefined' || typeof document === 'undefined') return () => undefined;
+    const target = event === 'visibilitychange' ? document : window;
+    target.addEventListener(event, listener);
+    return () => target.removeEventListener(event, listener);
+  },
+});
 
 const byRank = <Item extends { id: string; rank: string }>(left: Item, right: Item): number =>
   left.rank.localeCompare(right.rank) || left.id.localeCompare(right.id);
@@ -88,22 +137,42 @@ const viewFor = (state: MutableState): BookmarkStateView => {
     tagsByBookmark,
     expandedFolderIds: state.expandedFolderIds,
     notice: state.notice,
+    syncStatus: state.syncStatus,
+    lastSuccessfulSyncAt: state.lastSuccessfulSyncAt,
+    retainedSnapshotCompatibility: state.retainedSnapshotCompatibility,
+    coldLoadProgressVisible:
+      state.status === 'loading' && !state.snapshot && state.syncStatus === 'syncing',
+    searchQuery: state.searchQuery,
+    searchResults: state.searchResults,
   };
 };
 
 export const createBookmarkState = (adapters: {
   remote: BookmarkRemoteAdapter;
   storage: BookmarkStorageAdapter;
+  lifecycle?: BookmarkLifecycleAdapter;
+  search?: BookmarkSearchAdapter;
 }): BookmarkState => {
+  const lifecycle = adapters.lifecycle ?? createDefaultLifecycleAdapter();
   const state: MutableState = {
     status: 'loading',
     snapshot: null,
     selectedFolderId: SYSTEM_ROOT_FOLDER_ID,
     expandedFolderIds: [],
     notice: null,
+    syncStatus: 'idle',
+    lastSuccessfulSyncAt: null,
+    retainedSnapshotCompatibility: 'none',
+    searchQuery: '',
+    searchResults: [],
   };
   const listeners = new Set<(state: BookmarkStateView) => void>();
   let routeFolderId: string | undefined;
+  let refreshPromise: Promise<void> | null = null;
+  let refreshStartedAt = Number.NEGATIVE_INFINITY;
+  let intervalHandle: unknown;
+  const lifecycleUnsubscribers: Array<() => void> = [];
+  let searchRequest = 0;
 
   const emit = () => {
     const view = viewFor(state);
@@ -134,11 +203,23 @@ export const createBookmarkState = (adapters: {
     state.notice = 'The remembered Folder is no longer available. Showing Bookmarks instead.';
   };
 
-  const promote = async (snapshot: BookmarkSnapshot, fromRefresh: boolean) => {
+  const promote = async (
+    snapshot: BookmarkSnapshot,
+    fromRefresh: boolean,
+    synchronizedAt: string,
+  ) => {
     const selectedWasAvailable =
       state.snapshot?.folders.some((folder) => folder.id === state.selectedFolderId) ?? false;
+    await adapters.storage.writeSnapshot(snapshot, { synchronizedAt });
     state.snapshot = snapshot;
-    await adapters.storage.writeSnapshot(snapshot);
+    state.lastSuccessfulSyncAt = synchronizedAt;
+    state.retainedSnapshotCompatibility = 'compatible';
+    if (adapters.search) {
+      await adapters.search.replace(snapshot);
+      if (state.searchQuery) {
+        state.searchResults = [...(await adapters.search.search(state.searchQuery))];
+      }
+    }
     if (
       fromRefresh &&
       selectedWasAvailable &&
@@ -152,15 +233,84 @@ export const createBookmarkState = (adapters: {
   };
 
   const refresh = async () => {
-    try {
-      const replacement = await adapters.remote.readSnapshot(state.snapshot?.revision ?? null);
-      if (replacement) await promote(replacement, true);
-      if (state.snapshot && state.status === 'loading') state.status = 'ready';
-      emit();
-    } catch {
+    if (refreshPromise) {
+      const activeRefresh = refreshPromise;
+      const retryAfterward = state.syncStatus === 'slow' || state.syncStatus === 'failed';
+      await activeRefresh;
+      if (retryAfterward) await refresh();
+      return;
+    }
+    if (!lifecycle.isOnline()) {
+      state.syncStatus = 'offline';
       if (!state.snapshot) state.status = 'error';
       emit();
+      return;
     }
+
+    refreshPromise = (async () => {
+      refreshStartedAt = lifecycle.now();
+      const progressDelay = state.snapshot ? 2_000 : 2_500;
+      const controller = new AbortController();
+      const progressTimer = lifecycle.setTimeout(() => {
+        state.syncStatus = 'syncing';
+        emit();
+      }, progressDelay);
+      const slowTimer = lifecycle.setTimeout(() => {
+        state.syncStatus = 'slow';
+        controller.abort();
+        emit();
+      }, 5_000);
+
+      try {
+        const replacement = await adapters.remote.readSnapshot(
+          state.snapshot?.revision ?? null,
+          controller.signal,
+        );
+        const synchronizedAt = new Date(lifecycle.now()).toISOString();
+        if (replacement) await promote(replacement, true, synchronizedAt);
+        else if (state.snapshot) {
+          await adapters.storage.writeSnapshot(state.snapshot, { synchronizedAt });
+          state.lastSuccessfulSyncAt = synchronizedAt;
+        }
+        state.syncStatus = 'idle';
+      } catch {
+        state.syncStatus = controller.signal.aborted
+          ? 'slow'
+          : lifecycle.isOnline()
+            ? 'failed'
+            : 'offline';
+        if (!state.snapshot) state.status = 'error';
+      } finally {
+        lifecycle.clearTimeout(progressTimer);
+        lifecycle.clearTimeout(slowTimer);
+        refreshPromise = null;
+        emit();
+      }
+    })();
+    return refreshPromise;
+  };
+
+  const bindLifecycle = () => {
+    if (intervalHandle !== undefined) return;
+    lifecycleUnsubscribers.push(
+      lifecycle.subscribe('online', () => void refresh()),
+      lifecycle.subscribe('offline', () => {
+        state.syncStatus = 'offline';
+        emit();
+      }),
+      lifecycle.subscribe('visibilitychange', () => {
+        if (
+          lifecycle.isVisible() &&
+          lifecycle.isOnline() &&
+          lifecycle.now() - refreshStartedAt >= 60_000
+        ) {
+          void refresh();
+        }
+      }),
+    );
+    intervalHandle = lifecycle.setInterval(() => {
+      if (lifecycle.isVisible() && lifecycle.isOnline()) void refresh();
+    }, 60_000);
   };
 
   return {
@@ -176,28 +326,41 @@ export const createBookmarkState = (adapters: {
         adapters.storage.readSnapshot(),
         adapters.storage.readNavigation(),
       ]);
-      state.snapshot = storedSnapshot;
+      state.snapshot = storedSnapshot.status === 'compatible' ? storedSnapshot.snapshot : null;
+      state.lastSuccessfulSyncAt =
+        storedSnapshot.status === 'compatible' ? storedSnapshot.synchronizedAt : null;
+      state.retainedSnapshotCompatibility =
+        storedSnapshot.status === 'empty' ? 'none' : storedSnapshot.status;
       state.expandedFolderIds = navigation?.expandedFolderIds ?? [];
       const preferredFolderId =
         routeFolderId ?? navigation?.selectedFolderId ?? SYSTEM_ROOT_FOLDER_ID;
-      if (storedSnapshot) {
+      if (state.snapshot) {
         settleSelection(preferredFolderId, routeFolderId !== undefined);
         emit();
+        await adapters.search?.replace(state.snapshot);
       }
-
-      try {
-        const replacement = await adapters.remote.readSnapshot(storedSnapshot?.revision ?? null);
-        if (replacement) await promote(replacement, false);
-        if (state.snapshot) settleSelection(preferredFolderId, routeFolderId !== undefined);
-        else state.status = 'error';
-        if (state.status === 'ready') await writeNavigation();
-        emit();
-      } catch {
-        if (!state.snapshot) state.status = 'error';
-        emit();
-      }
+      bindLifecycle();
+      await refresh();
+      if (state.snapshot) settleSelection(preferredFolderId, routeFolderId !== undefined);
+      else state.status = 'error';
+      if (state.status === 'ready') await writeNavigation();
+      emit();
     },
     refresh,
+    refreshAfterMutation: refresh,
+    async search(query) {
+      const currentRequest = ++searchRequest;
+      state.searchQuery = query;
+      if (!query.trim() || !adapters.search) {
+        state.searchResults = [];
+        emit();
+        return;
+      }
+      const results = await adapters.search.search(query);
+      if (currentRequest !== searchRequest) return;
+      state.searchResults = [...results];
+      emit();
+    },
     async selectFolder(folderId) {
       if (!state.snapshot?.folders.some((folder) => folder.id === folderId)) {
         state.selectedFolderId = folderId;
@@ -219,6 +382,12 @@ export const createBookmarkState = (adapters: {
         : [...state.expandedFolderIds, folderId];
       await writeNavigation();
       emit();
+    },
+    dispose() {
+      if (intervalHandle !== undefined) lifecycle.clearInterval(intervalHandle);
+      intervalHandle = undefined;
+      for (const unsubscribe of lifecycleUnsubscribers.splice(0)) unsubscribe();
+      adapters.search?.dispose();
     },
   };
 };

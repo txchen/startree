@@ -54,6 +54,6 @@ INSERT INTO bookmarks (
 
 INSERT INTO bookmark_tags (bookmark_id, display_value, lowercase_key) VALUES
   ('20000000-0000-4000-8000-000000000001', 'Reference', 'reference'),
-  ('20000000-0000-4000-8000-000000000001', '阅读', '阅读');
+  ('20000000-0000-4000-8000-000000000001', 'Café', 'café');
 
 UPDATE bookmark_domain_state SET revision = 1 WHERE name = 'bookmarks';

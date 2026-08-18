@@ -117,13 +117,148 @@ try {
       throw new Error('The Bookmark card is not a native destination anchor.');
     }
     await page.getByText('A useful reference for complete-Worker verification.').waitFor();
-    await page.getByText('阅读').waitFor();
+    await page.getByText('Café').waitFor();
+
+    const searchInput = page.locator('#bookmark-search-input');
+    await page.locator('body').press('/');
+    if (!(await searchInput.evaluate((element) => element === document.activeElement))) {
+      throw new Error('The slash shortcut did not focus global Bookmark search.');
+    }
+    await searchInput.fill('Café');
+    const searchBookmark = page
+      .locator('.search-results a')
+      .filter({ hasText: 'Example Reference' });
+    await searchBookmark.waitFor();
+    if ((await searchBookmark.getAttribute('href')) !== 'https://example.com/reference') {
+      throw new Error('A Bookmark search result is not a native destination anchor.');
+    }
+    await searchBookmark.getByText('Bookmarks / Reading').waitFor();
+    await searchInput.press('Escape');
+    if (await page.locator('.search-results').count()) {
+      throw new Error('Escape did not close global Bookmark search.');
+    }
+
+    await searchInput.fill('');
+    await searchInput.press('/');
+    if ((await searchInput.inputValue()) !== '/') {
+      throw new Error('The global slash shortcut stole input from a form control.');
+    }
+    await searchInput.press('Escape');
+    await searchInput.blur();
+    await page.locator('body').press('Control+k');
+    if (!(await searchInput.evaluate((element) => element === document.activeElement))) {
+      throw new Error('The Control+K shortcut did not focus global Bookmark search.');
+    }
+    await searchInput.fill('Reading');
+    await page.locator('.search-results button').filter({ hasText: 'Reading' }).waitFor();
+    await searchInput.press('ArrowDown');
+    await searchInput.press('Enter');
+    await page.waitForURL(`**/bookmarks/10000000-0000-4000-8000-000000000001`);
 
     await page.goBack();
     await page.waitForURL(`**/bookmarks`);
     await page.getByRole('heading', { level: 1, name: 'Bookmarks' }).waitFor();
     await page.goForward();
     await page.getByRole('heading', { level: 1, name: 'Reading' }).waitFor();
+    await page.reload();
+    await page.getByRole('heading', { level: 1, name: 'Reading' }).waitFor();
+
+    await page.evaluate(async () => {
+      await navigator.serviceWorker.ready;
+    });
+    await page.reload();
+    await page.waitForFunction(() => navigator.serviceWorker.controller !== null);
+
+    const localStorageAudit = await page.evaluate(async () => {
+      const cacheNames = await caches.keys();
+      const cachedUrls = [];
+      let containsBookmarkData = false;
+      for (const cacheName of cacheNames) {
+        const cache = await caches.open(cacheName);
+        for (const request of await cache.keys()) {
+          cachedUrls.push(request.url);
+          const response = await cache.match(request);
+          const text = await response?.clone().text();
+          if (text?.includes('Example Reference') || text?.includes('example.com/reference')) {
+            containsBookmarkData = true;
+          }
+        }
+      }
+      return {
+        cacheNames,
+        cachedUrls,
+        containsBookmarkData,
+        localStorageKeys: Object.keys(localStorage),
+        sessionStorageKeys: Object.keys(sessionStorage),
+      };
+    });
+    if (
+      !localStorageAudit.cacheNames.some((name) => name.startsWith('startree-precache-')) ||
+      localStorageAudit.cachedUrls.some((url) => url.includes('/api/')) ||
+      localStorageAudit.containsBookmarkData ||
+      localStorageAudit.localStorageKeys.length ||
+      localStorageAudit.sessionStorageKeys.length
+    ) {
+      throw new Error(
+        `Structured Bookmark data escaped IndexedDB: ${JSON.stringify(localStorageAudit)}`,
+      );
+    }
+
+    await page.context().setOffline(true);
+    await page.reload();
+    await page.getByRole('heading', { level: 1, name: 'Reading' }).waitFor();
+    await page.evaluate(() => window.dispatchEvent(new Event('offline')));
+    const offlineStatus = page.locator('.sync-status');
+    await offlineStatus.waitFor();
+    const offlineText = await offlineStatus.textContent();
+    if (!offlineText?.includes('Offline — showing retained Bookmarks')) {
+      throw new Error(`Offline state was not exposed: ${offlineText}`);
+    }
+    await page.getByText(/Last synchronized:/).waitFor();
+    await searchInput.fill('useful reference');
+    await page.locator('.search-results a').filter({ hasText: 'Example Reference' }).waitFor();
+    await page.getByText('A useful reference for complete-Worker verification.').waitFor();
+    await page.getByText('Café').waitFor();
+
+    await page.route('**/api/bookmarks/snapshot', async (route) => {
+      await delay(6_000);
+      await route.continue();
+    });
+    await page.context().setOffline(false);
+    await page.evaluate(() => window.dispatchEvent(new Event('online')));
+    await page.locator('.sync-status.syncing').waitFor({ timeout: 4_000 });
+    await page.locator('.sync-status.slow').waitFor({ timeout: 7_000 });
+    await page.unrouteAll({ behavior: 'ignoreErrors' });
+    await page.getByRole('button', { name: 'Retry' }).click();
+    await page.locator('.sync-status').waitFor({ state: 'detached' });
+
+    await page.evaluate(
+      () =>
+        new Promise((resolve, reject) => {
+          const request = indexedDB.deleteDatabase('startree-bookmarks');
+          request.addEventListener('success', () => resolve(undefined), { once: true });
+          request.addEventListener('error', () => reject(request.error), { once: true });
+        }),
+    );
+    await page.context().setOffline(true);
+    await page.reload();
+    await page
+      .getByRole('heading', { level: 1, name: 'The library could not be loaded' })
+      .waitFor();
+    await page.evaluate(() => window.dispatchEvent(new Event('offline')));
+    await page.locator('.sync-status.offline').waitFor();
+    const emptyOfflineText = await page.locator('.library-state p').textContent();
+    const emptyOfflineStatus = await page.locator('.sync-status.offline').textContent();
+    if (!emptyOfflineText?.includes('Go online once to retain this private library')) {
+      throw new Error(`Offline-without-snapshot guidance was not exposed: ${emptyOfflineText}`);
+    }
+    if (
+      !emptyOfflineStatus?.includes('an online load is required') ||
+      emptyOfflineStatus.includes('showing retained Bookmarks')
+    ) {
+      throw new Error(`Offline-without-snapshot status was contradictory: ${emptyOfflineStatus}`);
+    }
+    await page.context().setOffline(false);
     await page.reload();
     await page.getByRole('heading', { level: 1, name: 'Reading' }).waitFor();
 
@@ -148,7 +283,9 @@ try {
     await browser.close();
   }
 
-  console.log('Local Worker passed D1-backed API and browser navigation verification.');
+  console.log(
+    'Local Worker passed D1-backed API, search, keyboard, offline, and refresh-degradation verification.',
+  );
 } finally {
   worker.kill('SIGTERM');
   await Promise.race([new Promise((resolve) => worker.once('exit', resolve)), delay(2_000)]);

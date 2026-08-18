@@ -1,11 +1,17 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { SYSTEM_ROOT_FOLDER_ID, type BookmarkSnapshot } from '../../shared/bookmarks/contracts';
 import { createBookmarkState } from './bookmark-state';
+import { createMiniSearchBookmarkAdapter } from './bookmark-search';
 import {
+  createMemoryBookmarkLifecycleAdapter,
   createMemoryBookmarkRemoteAdapter,
   createMemoryBookmarkStorageAdapter,
 } from './bookmark-state.test-helpers';
+
+afterEach(() => {
+  vi.useRealTimers();
+});
 
 const folderId = '10000000-0000-4000-8000-000000000001';
 const childAId = '10000000-0000-4000-8000-000000000002';
@@ -109,7 +115,10 @@ describe('Bookmark state Module Interface', () => {
     expect(state.getState().tagsByBookmark['20000000-0000-4000-8000-000000000001']).toEqual([
       'Reference',
     ]);
-    expect(await storage.readSnapshot()).toEqual(snapshot());
+    expect(await storage.readSnapshot()).toMatchObject({
+      status: 'compatible',
+      snapshot: snapshot(),
+    });
   });
 
   it('restores remembered navigation and expanded state locally', async () => {
@@ -198,5 +207,218 @@ describe('Bookmark state Module Interface', () => {
       notice: 'The selected Folder is no longer available. Showing Bookmarks instead.',
     });
     expect(remote.requestedRevisions).toEqual([null, 1]);
+  });
+
+  it('renders a compatible retained snapshot before its background refresh settles', async () => {
+    let resolveRefresh: ((value: BookmarkSnapshot | null) => void) | undefined;
+    const remote = {
+      readSnapshot: () =>
+        new Promise<BookmarkSnapshot | null>((resolve) => {
+          resolveRefresh = resolve;
+        }),
+    };
+    const state = createBookmarkState({
+      remote,
+      storage: createMemoryBookmarkStorageAdapter({
+        snapshot: snapshot(),
+        synchronizedAt: '2026-08-18T20:00:00.000Z',
+      }),
+      lifecycle: createMemoryBookmarkLifecycleAdapter(),
+    });
+
+    const initialization = state.initialize({ folderId });
+    await vi.waitFor(() => expect(state.getState().status).toBe('ready'));
+
+    expect(state.getState()).toMatchObject({
+      selectedFolder: { id: folderId },
+      lastSuccessfulSyncAt: '2026-08-18T20:00:00.000Z',
+      syncStatus: 'idle',
+    });
+    resolveRefresh?.(null);
+    await initialization;
+    state.dispose();
+  });
+
+  it('shows syncing after two seconds and a slow state after five while retaining content', async () => {
+    vi.useFakeTimers();
+    const lifecycle = createMemoryBookmarkLifecycleAdapter();
+    const remote = { readSnapshot: () => new Promise<BookmarkSnapshot | null>(() => undefined) };
+    const state = createBookmarkState({
+      remote,
+      storage: createMemoryBookmarkStorageAdapter({ snapshot: snapshot() }),
+      lifecycle,
+    });
+
+    void state.initialize();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(state.getState().status).toBe('ready');
+    expect(state.getState().syncStatus).toBe('idle');
+
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(state.getState().syncStatus).toBe('syncing');
+    await vi.advanceTimersByTimeAsync(3_000);
+    expect(state.getState().syncStatus).toBe('slow');
+    expect(state.getState().folders).toHaveLength(snapshot().folders.length);
+    state.dispose();
+  });
+
+  it('delays cold-load progress until two and a half seconds without a retained snapshot', async () => {
+    vi.useFakeTimers();
+    const state = createBookmarkState({
+      remote: { readSnapshot: () => new Promise<BookmarkSnapshot | null>(() => undefined) },
+      storage: createMemoryBookmarkStorageAdapter(),
+      lifecycle: createMemoryBookmarkLifecycleAdapter(),
+    });
+
+    void state.initialize();
+    await vi.advanceTimersByTimeAsync(2_499);
+    expect(state.getState()).toMatchObject({
+      status: 'loading',
+      coldLoadProgressVisible: false,
+    });
+
+    await vi.advanceTimersByTimeAsync(1);
+    expect(state.getState()).toMatchObject({
+      status: 'loading',
+      coldLoadProgressVisible: true,
+    });
+    state.dispose();
+  });
+
+  it('retains usable content and its synchronization time after a refresh failure', async () => {
+    const state = createBookmarkState({
+      remote: { readSnapshot: () => Promise.reject(new Error('offline')) },
+      storage: createMemoryBookmarkStorageAdapter({
+        snapshot: snapshot(),
+        synchronizedAt: '2026-08-18T20:00:00.000Z',
+      }),
+      lifecycle: createMemoryBookmarkLifecycleAdapter(),
+    });
+
+    await state.initialize();
+
+    expect(state.getState()).toMatchObject({
+      status: 'ready',
+      syncStatus: 'failed',
+      lastSuccessfulSyncAt: '2026-08-18T20:00:00.000Z',
+    });
+    expect(state.getState().folders).toHaveLength(snapshot().folders.length);
+    state.dispose();
+  });
+
+  it('queues a retry requested while a slow refresh is finishing its abort', async () => {
+    vi.useFakeTimers();
+    let requests = 0;
+    const state = createBookmarkState({
+      remote: {
+        readSnapshot(_revision, signal) {
+          requests += 1;
+          if (requests > 1) return Promise.resolve(null);
+          return new Promise((_resolve, reject) => {
+            signal?.addEventListener('abort', () => reject(new Error('slow')), { once: true });
+          });
+        },
+      },
+      storage: createMemoryBookmarkStorageAdapter({ snapshot: snapshot() }),
+      lifecycle: createMemoryBookmarkLifecycleAdapter(),
+    });
+
+    let retry: Promise<void> | undefined;
+    const unsubscribe = state.subscribe((view) => {
+      if (view.syncStatus === 'slow' && !retry) retry = state.refresh();
+    });
+    const initialization = state.initialize();
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(retry).toBeDefined();
+
+    await Promise.all([initialization, retry]);
+
+    expect(requests).toBe(2);
+    expect(state.getState().syncStatus).toBe('idle');
+    unsubscribe();
+    state.dispose();
+  });
+
+  it('does not interpret an incompatible retained snapshot while offline', async () => {
+    const remote = { readSnapshot: vi.fn(() => Promise.resolve(null)) };
+    const state = createBookmarkState({
+      remote,
+      storage: createMemoryBookmarkStorageAdapter({ incompatibleWireFormatVersion: 99 }),
+      lifecycle: createMemoryBookmarkLifecycleAdapter({ online: false }),
+    });
+
+    await state.initialize();
+
+    expect(state.getState()).toMatchObject({
+      status: 'error',
+      syncStatus: 'offline',
+      retainedSnapshotCompatibility: 'incompatible',
+    });
+    expect(remote.readSnapshot).not.toHaveBeenCalled();
+    state.dispose();
+  });
+
+  it('refreshes on reconnection, a visibility return after 60 seconds, and visible intervals', async () => {
+    vi.useFakeTimers();
+    const lifecycle = createMemoryBookmarkLifecycleAdapter();
+    const remote = createMemoryBookmarkRemoteAdapter(snapshot());
+    const state = createBookmarkState({
+      remote,
+      storage: createMemoryBookmarkStorageAdapter(),
+      lifecycle,
+    });
+    await state.initialize();
+    expect(remote.requestedRevisions).toEqual([null]);
+
+    lifecycle.setOnline(false);
+    lifecycle.setOnline(true);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(remote.requestedRevisions).toEqual([null, 1]);
+
+    lifecycle.setVisible(false);
+    await vi.advanceTimersByTimeAsync(60_000);
+    lifecycle.setVisible(true);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(remote.requestedRevisions).toHaveLength(3);
+
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(remote.requestedRevisions).toHaveLength(4);
+    state.dispose();
+  });
+
+  it('provides an authoritative mutation completion refresh hook', async () => {
+    const remote = createMemoryBookmarkRemoteAdapter(snapshot());
+    const state = createBookmarkState({
+      remote,
+      storage: createMemoryBookmarkStorageAdapter(),
+      lifecycle: createMemoryBookmarkLifecycleAdapter(),
+    });
+    await state.initialize();
+
+    await state.refreshAfterMutation();
+
+    expect(remote.requestedRevisions).toEqual([null, 1]);
+    state.dispose();
+  });
+
+  it('searches the active snapshot through the state Module Interface', async () => {
+    const state = createBookmarkState({
+      remote: createMemoryBookmarkRemoteAdapter(snapshot()),
+      storage: createMemoryBookmarkStorageAdapter(),
+      lifecycle: createMemoryBookmarkLifecycleAdapter(),
+      search: createMiniSearchBookmarkAdapter(),
+    });
+    await state.initialize();
+
+    await state.search('soon');
+
+    expect(state.getState().searchResults).toMatchObject([
+      {
+        kind: 'bookmark',
+        id: '20000000-0000-4000-8000-000000000001',
+        folderPath: 'Bookmarks / Reading',
+      },
+    ]);
+    state.dispose();
   });
 });

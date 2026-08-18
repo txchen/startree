@@ -1,8 +1,21 @@
 import vue from '@vitejs/plugin-vue';
 import { defineConfig } from 'vite-plus';
+import { VitePWA } from 'vite-plugin-pwa';
 
 export default defineConfig({
-  plugins: [vue()],
+  plugins: [
+    vue(),
+    VitePWA({
+      strategies: 'injectManifest',
+      srcDir: 'src/client',
+      filename: 'service-worker.ts',
+      injectRegister: false,
+      manifest: false,
+      injectManifest: {
+        globPatterns: ['**/*.{html,js,css,svg,png,ico,woff2}'],
+      },
+    }),
+  ],
   build: {
     outDir: 'dist',
     sourcemap: true,
