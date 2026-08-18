@@ -1,4 +1,5 @@
 import { run } from './process.mjs';
+import { releaseIdentity, releaseSteps } from './release-safety.mjs';
 
 const environment = process.argv[2];
 if (environment !== 'preview' && environment !== 'production') {
@@ -14,11 +15,8 @@ const wrangler = (...args) => [
 ];
 
 if (environment === 'production') {
-  run('git', ['diff', '--quiet']);
-  run('git', ['diff', '--cached', '--quiet']);
-
-  const untracked = run('git', ['ls-files', '--others', '--exclude-standard'], { capture: true });
-  if (untracked) {
+  const workingTree = run('git', ['status', '--porcelain'], { capture: true });
+  if (workingTree) {
     throw new Error('Production deployment requires a clean working tree.');
   }
 
@@ -26,15 +24,15 @@ if (environment === 'production') {
   run('git', ['merge-base', '--is-ancestor', revision, 'origin/master']);
 }
 
-run('npx', ['vp', 'run', 'check']);
-run('npx', ['vp', 'run', 'test']);
-run('npx', ['vp', 'run', 'build']);
-run('npx', wrangler('d1', 'migrations', 'list', 'DB', '--remote', '--env', environment));
-run('npx', wrangler('d1', 'migrations', 'apply', 'DB', '--remote', '--env', environment));
-run('npx', wrangler('deploy', '--env', environment, '--var', `APP_VERSION:${revision}`));
+for (const [command, args] of releaseSteps(environment, revision)) {
+  run(command, command === 'npx' && args[0] === 'wrangler' ? wrangler(...args.slice(1)) : args);
+}
 
-const target =
-  environment === 'production'
-    ? 'https://startree.txchen.win'
-    : 'the fixed startree-preview workers.dev URL';
-console.log(`Deployment completed for ${target} at Git revision ${revision}.`);
+const deployment = JSON.parse(
+  run('npx', wrangler('deployments', 'status', '--env', environment, '--json'), { capture: true }),
+);
+const { target, versionId } = releaseIdentity(environment, deployment);
+
+console.log(
+  `Deployment completed for ${target} at Git revision ${revision}; Worker version ${versionId}.`,
+);

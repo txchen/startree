@@ -11,14 +11,18 @@
     "lint": "vp lint",
     "typecheck": "vue-tsc --build --force && tsc --project tsconfig.server.json --noEmit",
     "check": "vp run format:check && vp run lint && vp run typecheck",
-    "test": "vp test --run",
+    "test": "vp test --run && node --test scripts/*.test.mjs",
     "build": "vp build",
     "types": "wrangler types --env local",
     "db:migrate:local": "wrangler d1 migrations apply DB --local --env local",
     "verify:migrations": "node scripts/verify-migrations.mjs",
     "verify:config": "node scripts/verify-environments.mjs",
     "verify:local": "node scripts/verify-local-worker.mjs",
-    "verify": "vp run check && vp run test && vp run build && vp run verify:migrations && vp run verify:config && vp run verify:local",
+    "verify:performance-data": "node scripts/verify-performance-data.mjs",
+    "verify": "vp run check && vp run test && vp run build && vp run verify:migrations && vp run verify:config && vp run verify:performance-data && vp run verify:local",
+    "measure:preview": "node scripts/measure-preview.mjs",
+    "performance:prepare:preview": "node scripts/prepare-preview-performance.mjs",
+    "access:capture:preview": "node scripts/capture-access-state.mjs",
     "deploy:preview": "node scripts/deploy.mjs preview",
     "deploy:production": "node scripts/deploy.mjs production"
   },
@@ -33,6 +37,7 @@
     "workbox-routing": "^7.4.1"
   },
   "devDependencies": {
+    "@axe-core/playwright": "^4.13.0",
     "@cloudflare/workers-types": "^5.20260818.1",
     "@types/node": "^26.2.0",
     "@vitejs/plugin-vue": "^6.0.8",

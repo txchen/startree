@@ -13,16 +13,27 @@ const identities = [local, preview, production].map((environment) => ({
   worker: environment.name,
 }));
 
+const configurationFailure = (check, message) => {
+  console.error(JSON.stringify({ event: 'configuration_failure', check }));
+  throw new Error(message);
+};
+
 if (new Set(identities.map(({ worker }) => worker)).size !== identities.length) {
-  throw new Error('Local, preview, and production Worker names must be distinct.');
+  configurationFailure(
+    'worker_environment_isolation',
+    'Local, preview, and production Worker names must be distinct.',
+  );
 }
 
 if (new Set(identities.map(({ database }) => database)).size !== identities.length) {
-  throw new Error('Local, preview, and production D1 database names must be distinct.');
+  configurationFailure(
+    'database_environment_isolation',
+    'Local, preview, and production D1 database names must be distinct.',
+  );
 }
 
 if (preview.workers_dev !== true || preview.preview_urls !== false) {
-  throw new Error('Preview must use only its fixed workers.dev hostname.');
+  configurationFailure('preview_surfaces', 'Preview must use only its fixed workers.dev hostname.');
 }
 
 const productionRoute = production.routes?.find(({ pattern }) => pattern === 'startree.txchen.win');
@@ -31,7 +42,22 @@ if (
   production.preview_urls !== false ||
   productionRoute?.custom_domain !== true
 ) {
-  throw new Error('Production must serve only the startree.txchen.win custom domain.');
+  configurationFailure(
+    'production_surfaces',
+    'Production must serve only the startree.txchen.win custom domain.',
+  );
+}
+
+for (const [name, environment] of Object.entries({ local, preview, production })) {
+  const rateLimit = environment.ratelimits?.find(
+    ({ name: binding }) => binding === 'MUTATION_RATE_LIMITER',
+  );
+  if (rateLimit?.simple?.limit !== 120 || rateLimit.simple.period !== 60) {
+    configurationFailure(
+      'mutation_rate_limit',
+      `${name} must limit Bookmark mutations to 120 requests per minute.`,
+    );
+  }
 }
 
 console.log('Environment isolation verified:', identities);

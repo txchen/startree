@@ -7,6 +7,12 @@ import { fileURLToPath } from 'node:url';
 
 import { chromium } from 'playwright';
 
+import { submitEditorAndMeasureMutation } from './browser-mutation-timing.mjs';
+import {
+  assertAccessible,
+  createAndVerifyHostileBookmark,
+  createAndVerifyHostileFolder,
+} from './local-worker-acceptance.mjs';
 import { run } from './process.mjs';
 
 const persistenceDirectory = mkdtempSync(join(tmpdir(), 'startree-worker-'));
@@ -105,15 +111,18 @@ try {
 
   const browser = await chromium.launch({ headless: true });
   try {
-    const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
+    const browserContext = await browser.newContext({ viewport: { width: 1280, height: 800 } });
+    const page = await browserContext.newPage();
     await page.goto(`http://127.0.0.1:${port}/bookmarks`);
     await page.getByRole('heading', { level: 1, name: 'Bookmarks' }).waitFor();
+    await assertAccessible(page, 'Bookmarks Page');
     await page.locator('.folder-grid button').filter({ hasText: 'Reading' }).click();
     await page.waitForURL(`**/bookmarks/10000000-0000-4000-8000-000000000001`);
     await page.getByRole('heading', { level: 1, name: 'Reading' }).waitFor();
     await page.getByRole('button', { name: 'Edit', exact: true }).click();
 
     await page.getByRole('button', { name: 'New Folder' }).click();
+    await assertAccessible(page, 'Folder editor');
     const folderNameInput = page.getByLabel('Folder name');
     await folderNameInput.fill('Draft Folder');
     await page.getByRole('button', { name: 'Cancel' }).click();
@@ -139,16 +148,44 @@ try {
 
     await page.getByRole('button', { name: 'New Folder' }).click();
     await page.getByLabel('Folder name').fill('UI Folder');
-    await page.getByRole('button', { name: 'Save' }).click();
+    const mutationTiming = await submitEditorAndMeasureMutation(page);
+    if (mutationTiming.acknowledgement > 100 || mutationTiming.completion > 1_000) {
+      throw new Error(
+        `Local mutation timing exceeded its target: ${JSON.stringify(mutationTiming)}`,
+      );
+    }
     await page.getByRole('dialog').waitFor({ state: 'detached' });
     await page.locator('.folder-grid').getByText('UI Folder', { exact: true }).waitFor();
+    await page.locator('.folder-tile button').filter({ hasText: 'UI Folder' }).click();
+    await page.getByRole('heading', { level: 1, name: 'UI Folder' }).waitFor();
+    await page.getByText('This Folder is empty').waitFor();
+    await assertAccessible(page, 'empty Folder');
+    await page.goBack();
+    await page.getByRole('heading', { level: 1, name: 'Reading' }).waitFor();
     await page.getByRole('button', { name: 'Edit UI Folder' }).click();
     await page.getByLabel('Folder name').fill('UI Folder Renamed');
     await page.getByRole('button', { name: 'Save' }).click();
     await page.getByRole('dialog').waitFor({ state: 'detached' });
     await page.locator('.folder-grid').getByText('UI Folder Renamed', { exact: true }).waitFor();
 
-    await page.getByRole('button', { name: 'New Bookmark' }).click();
+    await createAndVerifyHostileFolder(page);
+
+    const newBookmarkButton = page.getByRole('button', { name: 'New Bookmark' });
+    await newBookmarkButton.click();
+    await assertAccessible(page, 'Bookmark editor');
+    if (!(await page.getByLabel('URL').evaluate((element) => element === document.activeElement))) {
+      throw new Error('The Bookmark editor did not focus its first field.');
+    }
+    const editorCloseButton = page.getByRole('button', { name: 'Close editor' });
+    await editorCloseButton.focus();
+    await editorCloseButton.press('Shift+Tab');
+    if (
+      !(await page
+        .getByRole('button', { name: 'Save' })
+        .evaluate((element) => element === document.activeElement))
+    ) {
+      throw new Error('The Bookmark editor did not trap backward focus navigation.');
+    }
     await page.getByLabel('URL').fill('https://example.org/ui');
     await page.getByLabel('Title').fill('UI Bookmark');
     await page.getByLabel(/Tags/).fill(' Beta, alpha, beta ');
@@ -157,6 +194,9 @@ try {
     await page.getByRole('dialog').waitFor({ state: 'detached' });
     const createdBookmark = page.getByRole('link', { name: /UI Bookmark/ });
     await createdBookmark.waitFor();
+    if (!(await newBookmarkButton.evaluate((element) => element === document.activeElement))) {
+      throw new Error('Closing the Bookmark editor did not restore focus.');
+    }
     const editModeUrl = page.url();
     await createdBookmark.click();
     await page.getByRole('dialog').waitFor();
@@ -180,6 +220,8 @@ try {
       throw new Error(`Bookmark edit did not settle: ${JSON.stringify(diagnostics)}`);
     }
     await page.getByRole('link', { name: /UI Bookmark Edited/ }).waitFor();
+
+    await createAndVerifyHostileBookmark(page);
 
     await page.route('**/api/bookmarks/commands', async (route) => {
       await delay(1_200);
@@ -258,10 +300,14 @@ try {
 
     const articlesTile = page.locator('.folder-tile', { hasText: 'Articles' });
     const uiFolderTile = page.locator('.folder-tile', { hasText: 'UI Folder Renamed' });
-    await uiFolderTile.dragTo(articlesTile);
+    // Dispatch drag events directly so the ordering checks do not depend on pointer
+    // geometry while optimistic updates rerender both tiles.
+    await uiFolderTile.dispatchEvent('dragstart');
+    await articlesTile.dispatchEvent('drop');
     await page.waitForFunction(() =>
       [...document.querySelectorAll('.folder-tile')][0]?.textContent?.includes('UI Folder Renamed'),
     );
+    await page.locator('.write-status.pending').waitFor({ state: 'detached' });
 
     await page.route('**/api/bookmarks/commands', async (route) => {
       const staleCommand = route.request().postDataJSON();
@@ -291,7 +337,8 @@ try {
       }
       await route.continue();
     });
-    await articlesTile.dragTo(uiFolderTile);
+    await articlesTile.dispatchEvent('dragstart');
+    await uiFolderTile.dispatchEvent('drop');
     await page
       .getByText('The order changed elsewhere. Authoritative ordering was restored.')
       .waitFor();
@@ -300,7 +347,32 @@ try {
     );
     await page.unrouteAll({ behavior: 'wait' });
 
-    await page.getByRole('button', { name: 'Move UI Folder Renamed', exact: true }).click();
+    const moveFolderButton = page.getByRole('button', {
+      name: 'Move UI Folder Renamed',
+      exact: true,
+    });
+    await moveFolderButton.click();
+    await assertAccessible(page, 'move dialog');
+    if (
+      !(await page
+        .getByLabel('Destination Folder')
+        .evaluate((element) => element === document.activeElement))
+    ) {
+      throw new Error('The move dialog did not focus the destination control.');
+    }
+    await page.getByLabel('Destination Folder').press('Shift+Tab');
+    if (
+      !(await page
+        .locator('.move-dialog')
+        .evaluate((dialog) => dialog.contains(document.activeElement)))
+    ) {
+      throw new Error('The move dialog did not trap focus.');
+    }
+    await page.locator('.move-dialog').getByRole('button', { name: 'Cancel' }).click();
+    if (!(await moveFolderButton.evaluate((element) => element === document.activeElement))) {
+      throw new Error('Closing the move dialog did not restore focus.');
+    }
+    await moveFolderButton.click();
     await page
       .getByLabel('Destination Folder')
       .selectOption('10000000-0000-4000-8000-000000000003');
@@ -358,8 +430,10 @@ try {
     await page.getByRole('button', { name: 'Trash', exact: true }).click();
     await page.getByRole('heading', { level: 1, name: 'Trash' }).waitFor();
     await page.getByText('Authoritative Bookmark', { exact: true }).waitFor();
+    await assertAccessible(page, 'populated Trash');
     await page.getByRole('button', { name: 'Restore' }).click();
     await page.getByText('Trash is empty').waitFor();
+    await assertAccessible(page, 'empty Trash');
     await page.getByRole('button', { name: 'Back to Bookmarks' }).click();
     await page.getByRole('link', { name: /Authoritative Bookmark/ }).waitFor();
     await page.getByRole('button', { name: 'Edit', exact: true }).click();
@@ -403,6 +477,7 @@ try {
       .locator('.search-results a')
       .filter({ hasText: 'Example Reference' });
     await searchBookmark.waitFor();
+    await assertAccessible(page, 'Bookmark search');
     if ((await searchBookmark.getAttribute('href')) !== 'https://example.com/reference') {
       throw new Error('A Bookmark search result is not a native destination anchor.');
     }
@@ -411,6 +486,11 @@ try {
     if (await page.locator('.search-results').count()) {
       throw new Error('Escape did not close global Bookmark search.');
     }
+
+    await searchInput.fill('no such Bookmark result');
+    await page.locator('.search-empty').waitFor();
+    await assertAccessible(page, 'empty search');
+    await searchInput.press('Escape');
 
     await searchInput.fill('');
     await searchInput.press('/');
@@ -519,6 +599,7 @@ try {
     await page.getByText(/Last synchronized:/).waitFor();
     await page.getByRole('button', { name: 'Trash', exact: true }).click();
     await page.getByRole('heading', { level: 1, name: 'Trash' }).waitFor();
+    await assertAccessible(page, 'offline Trash');
     const offlineTrashText = await page.locator('.trash-view').textContent();
     if (!offlineTrashText?.includes('Trash is online only')) {
       throw new Error(`Trash did not expose its online-only state: ${offlineTrashText}`);
@@ -554,6 +635,7 @@ try {
     await page
       .getByRole('heading', { level: 1, name: 'The library could not be loaded' })
       .waitFor();
+    await assertAccessible(page, 'unavailable library state');
     await page.evaluate(() => window.dispatchEvent(new Event('offline')));
     await page.locator('.sync-status.offline').waitFor();
     const emptyOfflineText = await page.locator('.library-state p').textContent();
@@ -576,10 +658,31 @@ try {
     await page.getByRole('heading', { level: 1, name: 'Reading' }).waitFor();
     await page.goForward();
     await page.getByRole('heading', { level: 1, name: 'Folder not found' }).waitFor();
+    await assertAccessible(page, 'missing Folder');
 
     await page.setViewportSize({ width: 390, height: 844 });
     await page.goto(`http://127.0.0.1:${port}/bookmarks`);
-    await page.getByRole('button', { name: 'Folders' }).click();
+    const mobileFolderButton = page.getByRole('button', { name: 'Folders' });
+    await mobileFolderButton.click();
+    await assertAccessible(page, 'mobile Folder drawer');
+    const drawerCloseButton = page.getByRole('button', { name: 'Close Folder drawer' });
+    if (!(await drawerCloseButton.evaluate((element) => element === document.activeElement))) {
+      throw new Error('The mobile Folder drawer did not receive focus.');
+    }
+    await drawerCloseButton.press('Shift+Tab');
+    if (
+      !(await page
+        .locator('.folder-drawer')
+        .evaluate((drawer) => drawer.contains(document.activeElement)))
+    ) {
+      throw new Error('The mobile Folder drawer did not trap focus.');
+    }
+    await drawerCloseButton.focus();
+    await drawerCloseButton.click();
+    if (!(await mobileFolderButton.evaluate((element) => element === document.activeElement))) {
+      throw new Error('Closing the mobile Folder drawer did not restore focus.');
+    }
+    await mobileFolderButton.click();
     await page.locator('.folder-drawer .tree-folder').filter({ hasText: 'Reading' }).click();
     await page.getByRole('heading', { level: 1, name: 'Reading' }).waitFor();
     if (await page.locator('.folder-drawer').isVisible()) {

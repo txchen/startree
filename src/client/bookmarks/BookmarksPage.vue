@@ -19,13 +19,17 @@ import {
 } from './bookmark-adapters';
 import { createWorkerBookmarkSearchAdapter } from './bookmark-search';
 import { createBookmarkState, type BookmarkStateView } from './bookmark-state';
+import { trapDialogFocus } from './dialog-focus';
 import FolderNavigation from './FolderNavigation.vue';
 
 const route = useRoute();
 const router = useRouter();
 const drawerOpen = ref(false);
+const mobileFolderButton = ref<HTMLButtonElement>();
+const drawerCloseButton = ref<HTMLButtonElement>();
 const initialized = ref(false);
 const searchInput = ref<HTMLInputElement>();
+const moveDestinationInput = ref<HTMLSelectElement>();
 const selectedSearchResult = ref(0);
 const editor = ref<{
   kind: 'folder' | 'bookmark';
@@ -40,6 +44,7 @@ const dragged = ref<{ kind: 'folder' | 'bookmark'; id: string } | null>(null);
 const moveEditor = ref<{ kind: 'folder' | 'bookmark'; id: string } | null>(null);
 const moveDestinationId = ref(SYSTEM_ROOT_FOLDER_ID);
 const moveBeforeId = ref('');
+let moveReturnFocus: HTMLElement | null = null;
 const trashOpen = ref(false);
 const undoableTrash = ref<{ root: BookmarkTrashRoot; version: number } | null>(null);
 const stateModule = createBookmarkState({
@@ -79,6 +84,16 @@ const routeFolderId = (): string | undefined => {
 
 const folderLocation = (folderId: string) =>
   folderId === SYSTEM_ROOT_FOLDER_ID ? '/bookmarks' : `/bookmarks/${folderId}`;
+
+const openDrawer = () => {
+  drawerOpen.value = true;
+  void nextTick(() => drawerCloseButton.value?.focus());
+};
+
+const closeDrawer = () => {
+  drawerOpen.value = false;
+  void nextTick(() => mobileFolderButton.value?.focus());
+};
 
 const navigateToFolder = async (folderId: string) => {
   drawerOpen.value = false;
@@ -206,9 +221,19 @@ const dropBookmark = async (beforeBookmarkId?: string) => {
 };
 
 const openMoveEditor = (kind: 'folder' | 'bookmark', id: string) => {
+  moveReturnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
   moveEditor.value = { kind, id };
   moveDestinationId.value = state.value.selectedFolder?.id ?? SYSTEM_ROOT_FOLDER_ID;
   moveBeforeId.value = '';
+  void nextTick(() => moveDestinationInput.value?.focus());
+};
+
+const closeMoveEditor = () => {
+  moveEditor.value = null;
+  void nextTick(() => {
+    if (moveReturnFocus?.isConnected) moveReturnFocus.focus();
+    moveReturnFocus = null;
+  });
 };
 
 const folderIsWithin = (candidateId: string, ancestorId: string): boolean => {
@@ -287,7 +312,7 @@ const moveEditorModel = computed(() => {
 
 const saveMove = async () => {
   const result = await moveEditorModel.value?.execute();
-  if (result?.status === 'acknowledged') moveEditor.value = null;
+  if (result?.status === 'acknowledged') closeMoveEditor();
 };
 
 const copyEditorValue = (value: BookmarkEditorValue): BookmarkEditorValue => ({
@@ -593,8 +618,8 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <section class="bookmarks-page" aria-labelledby="bookmarks-title">
-    <button class="mobile-folder-button" type="button" @click="drawerOpen = true">
+  <section class="bookmarks-page">
+    <button ref="mobileFolderButton" class="mobile-folder-button" type="button" @click="openDrawer">
       <span aria-hidden="true">☰</span> Folders
     </button>
 
@@ -994,11 +1019,23 @@ onUnmounted(() => {
       </template>
     </div>
 
-    <div v-if="drawerOpen" class="drawer-backdrop" @click.self="drawerOpen = false">
-      <aside class="folder-drawer" role="dialog" aria-modal="true" aria-label="Folders">
+    <div v-if="drawerOpen" class="drawer-backdrop" @click.self="closeDrawer">
+      <div
+        class="folder-drawer"
+        role="dialog"
+        aria-modal="true"
+        aria-label="Folders"
+        @keydown="trapDialogFocus"
+        @keydown.esc.prevent="closeDrawer"
+      >
         <div class="drawer-heading">
           <h2>Folders</h2>
-          <button type="button" aria-label="Close Folder drawer" @click="drawerOpen = false">
+          <button
+            ref="drawerCloseButton"
+            type="button"
+            aria-label="Close Folder drawer"
+            @click="closeDrawer"
+          >
             ×
           </button>
         </div>
@@ -1019,7 +1056,7 @@ onUnmounted(() => {
         >
           Trash
         </button>
-      </aside>
+      </div>
     </div>
 
     <BookmarkEditorModal
@@ -1039,13 +1076,24 @@ onUnmounted(() => {
     <div
       v-if="moveEditor && editingAvailable && editMode"
       class="move-backdrop"
-      @click.self="moveEditor = null"
+      @click.self="closeMoveEditor"
     >
-      <div class="move-dialog" role="dialog" aria-modal="true" aria-labelledby="move-title">
+      <div
+        class="move-dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="move-title"
+        @keydown="trapDialogFocus"
+        @keydown.esc.prevent="closeMoveEditor"
+      >
         <h2 id="move-title">Move {{ moveEditorModel?.noun }}</h2>
         <label>
           Destination Folder
-          <select v-model="moveDestinationId" @change="moveBeforeId = ''">
+          <select
+            ref="moveDestinationInput"
+            v-model="moveDestinationId"
+            @change="moveBeforeId = ''"
+          >
             <option
               v-for="folder in moveEditorModel?.destinations"
               :key="folder.id"
@@ -1065,7 +1113,7 @@ onUnmounted(() => {
           </select>
         </label>
         <div class="move-dialog-actions">
-          <button type="button" @click="moveEditor = null">Cancel</button>
+          <button type="button" @click="closeMoveEditor">Cancel</button>
           <button type="button" @click="saveMove">Move</button>
         </div>
       </div>

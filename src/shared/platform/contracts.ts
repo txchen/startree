@@ -18,6 +18,15 @@ export const apiErrorSchema = v.object({
     message: v.string(),
     requestId: v.string(),
     version: v.string(),
+    operationId: v.optional(v.string()),
+    field: v.optional(v.string()),
+    conflict: v.optional(v.string()),
+    currentRevision: v.optional(v.pipe(v.number(), v.integer(), v.minValue(0))),
+    relevantVersions: v.optional(v.record(v.string(), v.pipe(v.number(), v.integer()))),
+    exceptionType: v.optional(v.string()),
+    causeChain: v.optional(v.array(v.string())),
+    sanitizedStack: v.optional(v.array(v.string())),
+    retryAfterSeconds: v.optional(v.pipe(v.number(), v.integer(), v.minValue(1))),
   }),
 });
 

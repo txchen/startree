@@ -1,3 +1,4 @@
+-- startree: expand-contract-compatible
 PRAGMA foreign_keys = ON;
 
 CREATE TABLE bookmark_folders (

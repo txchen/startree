@@ -3,4 +3,5 @@ dist/
 .wrangler/
 .vite-plus/
 *.log
+*.storage-state.json
 .DS_Store

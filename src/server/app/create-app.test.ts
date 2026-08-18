@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import {
   SYSTEM_ROOT_FOLDER_ID,
@@ -11,6 +11,7 @@ import { createApp } from './create-app';
 const bindings = {
   APP_VERSION: 'test-version',
   ASSETS: { fetch: () => Promise.resolve(new Response('asset')) },
+  MUTATION_RATE_LIMITER: { limit: () => Promise.resolve({ success: true }) },
 };
 
 const snapshot: BookmarkSnapshot = {
@@ -82,6 +83,39 @@ describe('platform API', () => {
     expect(body.error.requestId).toBeTruthy();
   });
 
+  it('sanitizes exception diagnostics without exposing exception messages or causes', async () => {
+    const log = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const app = createApp<typeof bindings>({
+      readBookmarkRevision: () =>
+        Promise.reject(
+          new TypeError('Owner title must stay private', {
+            cause: new Error('Owner Note must stay private'),
+          }),
+        ),
+      readBookmarkSnapshot: () => Promise.resolve(snapshot),
+      readBookmarkTrash: () => Promise.resolve(trash),
+      executeBookmarkCommand: () => Promise.reject(new Error('unused')),
+    });
+
+    const response = await app.request('/api/v1/platform', undefined, bindings);
+    const text = await response.text();
+    const logged = log.mock.calls.flat().join(' ');
+    log.mockRestore();
+
+    expect(response.status).toBe(500);
+    expect(JSON.parse(text)).toMatchObject({
+      error: {
+        code: 'internal_error',
+        operation: 'request',
+        exceptionType: 'TypeError',
+        causeChain: ['TypeError', 'Error'],
+      },
+    });
+    expect(JSON.parse(text).error.sanitizedStack).toBeInstanceOf(Array);
+    expect(`${text}${logged}`).not.toContain('Owner title');
+    expect(`${text}${logged}`).not.toContain('Owner Note');
+  });
+
   it('delegates client routes to the static asset binding', async () => {
     const response = await createTestApp().request('/bookmarks/folder', undefined, bindings);
 
@@ -151,6 +185,39 @@ describe('platform API', () => {
     });
   });
 
+  it('returns a structured retry response when the mutation rate limit is exhausted', async () => {
+    const limitedBindings = {
+      ...bindings,
+      MUTATION_RATE_LIMITER: { limit: () => Promise.resolve({ success: false }) },
+    };
+    const response = await createTestApp().request(
+      'http://startree.local/api/bookmarks/commands',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Origin: 'http://startree.local' },
+        body: '{}',
+      },
+      limitedBindings,
+    );
+
+    expect(response.status).toBe(429);
+    expect(response.headers.get('retry-after')).toBe('60');
+    await expect(response.json()).resolves.toMatchObject({
+      error: { code: 'rate_limited', operation: 'bookmark_command', retryAfterSeconds: 60 },
+    });
+  });
+
+  it('does not enable cross-origin API reads', async () => {
+    const response = await createTestApp().request(
+      'http://startree.local/api/bookmarks/snapshot',
+      { headers: { Origin: 'https://attacker.example' } },
+      bindings,
+    );
+
+    expect(response.headers.get('access-control-allow-origin')).toBeNull();
+    expect(response.headers.get('access-control-allow-credentials')).toBeNull();
+  });
+
   it('maps structured command conflicts to 409', async () => {
     const app = createApp<typeof bindings>({
       readBookmarkRevision: () => Promise.resolve(7),
@@ -189,6 +256,42 @@ describe('platform API', () => {
       status: 'conflict',
       code: 'stale_entity',
     });
+  });
+
+  it('returns safe operation diagnostics when command execution fails', async () => {
+    const app = createApp<typeof bindings>({
+      readBookmarkRevision: () => Promise.resolve(7),
+      readBookmarkSnapshot: () => Promise.resolve(snapshot),
+      readBookmarkTrash: () => Promise.resolve(trash),
+      executeBookmarkCommand: () => Promise.reject(new TypeError('private Bookmark title')),
+    });
+    const response = await app.request(
+      'http://startree.local/api/bookmarks/commands',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Origin: 'http://startree.local' },
+        body: JSON.stringify({
+          type: 'createFolder',
+          operationId: 'a0000000-0000-4000-8000-000000000005',
+          parentId: SYSTEM_ROOT_FOLDER_ID,
+          expectedFolderSequenceVersion: 1,
+          name: 'Reading',
+        }),
+      },
+      bindings,
+    );
+    const text = await response.text();
+
+    expect(response.status).toBe(500);
+    expect(JSON.parse(text)).toMatchObject({
+      error: {
+        code: 'internal_error',
+        operation: 'createFolder',
+        operationId: 'a0000000-0000-4000-8000-000000000005',
+        exceptionType: 'TypeError',
+      },
+    });
+    expect(text).not.toContain('private Bookmark title');
   });
 
   it.each([

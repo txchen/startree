@@ -21,6 +21,13 @@
       "vars": {
         "APP_VERSION": "local",
       },
+      "ratelimits": [
+        {
+          "name": "MUTATION_RATE_LIMITER",
+          "namespace_id": "10020",
+          "simple": { "limit": 120, "period": 60 },
+        },
+      ],
       "d1_databases": [
         {
           "binding": "DB",
@@ -42,6 +49,13 @@
       "vars": {
         "APP_VERSION": "preview",
       },
+      "ratelimits": [
+        {
+          "name": "MUTATION_RATE_LIMITER",
+          "namespace_id": "20020",
+          "simple": { "limit": 120, "period": 60 },
+        },
+      ],
       "d1_databases": [
         {
           "binding": "DB",
@@ -70,6 +84,13 @@
       "vars": {
         "APP_VERSION": "production",
       },
+      "ratelimits": [
+        {
+          "name": "MUTATION_RATE_LIMITER",
+          "namespace_id": "30020",
+          "simple": { "limit": 120, "period": 60 },
+        },
+      ],
       "d1_databases": [
         {
           "binding": "DB",

@@ -25,4 +25,5 @@ jobs:
       - run: vp run build
       - run: vp run verify:migrations
       - run: vp run verify:config
+      - run: vp run verify:performance-data
       - run: vp run verify:local

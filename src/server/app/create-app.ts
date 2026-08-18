@@ -14,7 +14,7 @@ import {
   type BookmarkTrash,
 } from '../../shared/bookmarks/contracts';
 import { platformStatusSchema } from '../../shared/platform/contracts';
-import { errorResponse, requestIdFor } from './errors';
+import { errorResponse, requestIdFor, sanitizedExceptionDiagnostics } from './errors';
 import { securityHeaders } from './security';
 import type { AppEnvironment, CoreBindings } from './types';
 
@@ -115,6 +115,27 @@ export const createApp = <Bindings extends CoreBindings>(services: AppServices<B
       );
     }
 
+    const rateLimit = await context.env.MUTATION_RATE_LIMITER.limit({ key: 'owner' });
+    if (!rateLimit.success) {
+      context.header('Retry-After', '60');
+      console.warn(
+        JSON.stringify({
+          event: 'bookmark_mutation',
+          outcome: 'rate_limited',
+          requestId: requestIdFor(context),
+          version: context.env.APP_VERSION,
+        }),
+      );
+      return errorResponse(
+        context,
+        429,
+        'rate_limited',
+        'bookmark_command',
+        'Too many Bookmark changes were requested. Retry shortly.',
+        { retryAfterSeconds: 60 },
+      );
+    }
+
     const declaredLength = Number(context.req.header('Content-Length') ?? '0');
     if (Number.isFinite(declaredLength) && declaredLength > MAX_COMMAND_BYTES) {
       return errorResponse(
@@ -160,9 +181,46 @@ export const createApp = <Bindings extends CoreBindings>(services: AppServices<B
       );
     }
 
-    const result = v.parse(
-      bookmarkCommandResultSchema,
-      await services.executeBookmarkCommand(parsedCommand.output, context.env),
+    let result: BookmarkCommandResult;
+    try {
+      result = v.parse(
+        bookmarkCommandResultSchema,
+        await services.executeBookmarkCommand(parsedCommand.output, context.env),
+      );
+    } catch (error) {
+      console.error(
+        JSON.stringify({
+          event: 'bookmark_mutation',
+          mutationType: parsedCommand.output.type,
+          outcome: 'exception',
+          operationId: parsedCommand.output.operationId,
+          requestId: requestIdFor(context),
+          version: context.env.APP_VERSION,
+          ...sanitizedExceptionDiagnostics(error),
+        }),
+      );
+      return errorResponse(
+        context,
+        500,
+        'internal_error',
+        parsedCommand.output.type,
+        'The Bookmark change could not be completed.',
+        {
+          operationId: parsedCommand.output.operationId,
+          ...sanitizedExceptionDiagnostics(error),
+        },
+      );
+    }
+    console.log(
+      JSON.stringify({
+        event: 'bookmark_mutation',
+        mutationType: parsedCommand.output.type,
+        outcome: result.status,
+        ...(result.status === 'conflict' ? { conflict: result.code } : {}),
+        operationId: parsedCommand.output.operationId,
+        requestId: requestIdFor(context),
+        version: context.env.APP_VERSION,
+      }),
     );
     return context.json(result, result.status === 'conflict' ? 409 : 200);
   });
@@ -177,10 +235,11 @@ export const createApp = <Bindings extends CoreBindings>(services: AppServices<B
 
   app.onError((error, context) => {
     const requestId = requestIdFor(context);
+    const diagnostics = sanitizedExceptionDiagnostics(error);
     console.error(
       JSON.stringify({
         event: 'uncaught_exception',
-        exceptionType: error.name,
+        ...diagnostics,
         requestId,
         version: context.env.APP_VERSION,
       }),
@@ -194,6 +253,7 @@ export const createApp = <Bindings extends CoreBindings>(services: AppServices<B
           message: 'The request could not be completed.',
           requestId,
           version: context.env.APP_VERSION,
+          ...diagnostics,
         },
       } satisfies import('../../shared/platform/contracts').ApiError,
       500,
