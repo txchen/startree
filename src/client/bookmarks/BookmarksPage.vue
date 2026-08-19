@@ -151,7 +151,6 @@ const closeDrawer = () => {
 
 const navigateToFolder = async (folderId: string) => {
   drawerOpen.value = false;
-  if (!(await stateModule.selectFolder(folderId))) return;
   await router.push(folderLocation(folderId));
 };
 

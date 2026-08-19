@@ -209,6 +209,7 @@ try {
     await page.getByText('This Folder is empty').waitFor();
     await assertAccessible(page, 'empty Folder');
     await page.goBack();
+    await page.waitForURL(`**/bookmarks/10000000-0000-4000-8000-000000000001`);
     await page.getByRole('heading', { level: 1, name: 'Reading' }).waitFor();
     await page.getByRole('button', { name: 'Edit UI Folder' }).click();
     await page.getByLabel('Folder name').fill('UI Folder Renamed');
@@ -473,14 +474,18 @@ try {
     await page.getByRole('link', { name: /Authoritative Bookmark/ }).waitFor({ state: 'detached' });
 
     await page.locator('.folder-tile button').filter({ hasText: 'Articles' }).click();
+    await page.waitForURL(`**/bookmarks/10000000-0000-4000-8000-000000000003`);
     await page.getByRole('heading', { level: 1, name: 'Articles' }).waitFor();
     await page.getByText('UI Folder Renamed', { exact: true }).waitFor();
     await page.getByRole('link', { name: /Authoritative Bookmark/ }).waitFor();
     await page.goBack();
+    await page.waitForURL(`**/bookmarks/10000000-0000-4000-8000-000000000001`);
     await page.getByRole('heading', { level: 1, name: 'Reading' }).waitFor();
     await page.goForward();
+    await page.waitForURL(`**/bookmarks/10000000-0000-4000-8000-000000000003`);
     await page.getByRole('heading', { level: 1, name: 'Articles' }).waitFor();
     await page.goBack();
+    await page.waitForURL(`**/bookmarks/10000000-0000-4000-8000-000000000001`);
     await page.getByRole('heading', { level: 1, name: 'Reading' }).waitFor();
 
     let folderConfirmation = '';
@@ -504,6 +509,7 @@ try {
     await page.locator('.folder-grid').getByText('Articles', { exact: true }).waitFor();
 
     await page.locator('.folder-tile button').filter({ hasText: 'Articles' }).click();
+    await page.waitForURL(`**/bookmarks/10000000-0000-4000-8000-000000000003`);
     await page.getByRole('heading', { level: 1, name: 'Articles' }).waitFor();
     await page.getByRole('button', { name: 'Move Authoritative Bookmark to Trash' }).click();
     await page.getByText('Moved to Trash.').waitFor();
