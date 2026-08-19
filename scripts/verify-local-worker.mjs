@@ -603,6 +603,9 @@ try {
     }
     await searchInput.press('Escape');
     await searchInput.blur();
+    await page.locator('#folder-sidebar .root-folder').click();
+    await page.waitForURL(`**/bookmarks`);
+    await page.getByRole('heading', { level: 1, name: 'Bookmarks' }).waitFor();
     await page.locator('body').press('Control+k');
     if (!(await searchInput.evaluate((element) => element === document.activeElement))) {
       throw new Error('The Control+K shortcut did not focus global Bookmark search.');
