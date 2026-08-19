@@ -1,6 +1,6 @@
 # Operations
 
-Startree has local, preview, and production environments. Their Worker names and D1 database names are deliberately distinct. Deployments run only from the Owner's authenticated local machine; CI never receives Cloudflare credentials, contacts remote D1, or deploys.
+Startree has local, preview, and production environments. Preview uses the `startree-preview` Worker and production uses the `startree` Worker; their D1 database names remain deliberately distinct. Deployments run only from the Owner's authenticated local machine; CI never receives Cloudflare credentials, contacts remote D1, or deploys.
 
 ## Access prerequisite
 

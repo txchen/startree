@@ -25,6 +25,13 @@ if (new Set(identities.map(({ worker }) => worker)).size !== identities.length) 
   );
 }
 
+if (preview.name !== 'startree-preview' || production.name !== 'startree') {
+  configurationFailure(
+    'worker_names',
+    'Preview must use startree-preview and production must use startree.',
+  );
+}
+
 if (new Set(identities.map(({ database }) => database)).size !== identities.length) {
   configurationFailure(
     'database_environment_isolation',
