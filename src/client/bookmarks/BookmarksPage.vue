@@ -17,7 +17,7 @@ import {
   createFetchBookmarkAdapter,
   createIndexedDbBookmarkAdapter,
 } from './bookmark-adapters';
-import { createWorkerBookmarkSearchAdapter } from './bookmark-search';
+import { BOOKMARK_SEARCH_RESULT_LIMIT, createWorkerBookmarkSearchAdapter } from './bookmark-search';
 import { createBookmarkState, type BookmarkStateView } from './bookmark-state';
 import { trapDialogFocus } from './dialog-focus';
 import FolderNavigation from './FolderNavigation.vue';
@@ -151,6 +151,7 @@ const closeDrawer = () => {
 
 const navigateToFolder = async (folderId: string) => {
   drawerOpen.value = false;
+  if (!(await stateModule.selectFolder(folderId))) return;
   await router.push(folderLocation(folderId));
 };
 
@@ -168,12 +169,16 @@ const closeSearch = async () => {
   selectedSearchResult.value = 0;
 };
 
-const activateSearchResult = async () => {
+const activateSearchResult = async (openInNewTab = false) => {
   const result = state.value.searchResults[selectedSearchResult.value];
   if (!result) return;
   if (result.kind === 'folder') {
     await closeSearch();
     await navigateToFolder(result.folderId);
+    return;
+  }
+  if (openInNewTab) {
+    window.open(result.url, '_blank', 'noopener,noreferrer');
     return;
   }
   document
@@ -199,7 +204,7 @@ const handleSearchKeydown = async (event: KeyboardEvent) => {
       state.value.searchResults.length;
   } else if (event.key === 'Enter') {
     event.preventDefault();
-    await activateSearchResult();
+    await activateSearchResult(event.metaKey || event.ctrlKey);
   }
 };
 
@@ -697,7 +702,9 @@ watch(
   () => route.fullPath,
   async () => {
     if (!initialized.value) return;
-    await stateModule.selectFolder(routeFolderId() ?? SYSTEM_ROOT_FOLDER_ID);
+    const folderId = routeFolderId() ?? SYSTEM_ROOT_FOLDER_ID;
+    if (state.value.selectedFolder?.id === folderId) return;
+    await stateModule.selectFolder(folderId);
   },
 );
 
@@ -814,6 +821,8 @@ onUnmounted(() => {
             placeholder="Search titles, URLs, Tags, and Notes"
             autocomplete="off"
             role="combobox"
+            aria-autocomplete="list"
+            aria-haspopup="listbox"
             aria-controls="bookmark-search-results"
             :aria-expanded="searchOpen"
             :aria-activedescendant="selectedResultId"
@@ -822,16 +831,27 @@ onUnmounted(() => {
           />
           <kbd>/</kbd>
         </div>
-        <div v-if="searchOpen" id="bookmark-search-results" class="search-results">
-          <p v-if="!state.searchResults.length" class="search-empty">
+        <div v-if="searchOpen" class="search-results">
+          <p
+            v-if="!state.searchResults.length"
+            id="bookmark-search-results"
+            class="search-empty"
+            role="status"
+          >
             No active Folders or Bookmarks match.
           </p>
-          <ul v-else>
-            <li v-for="(result, index) in state.searchResults" :key="`${result.kind}:${result.id}`">
+          <ul v-else id="bookmark-search-results" role="listbox" aria-label="Search results">
+            <li
+              v-for="(result, index) in state.searchResults"
+              :key="`${result.kind}:${result.id}`"
+              role="presentation"
+            >
               <button
                 v-if="result.kind === 'folder'"
                 :id="`search-result-${index}`"
                 type="button"
+                role="option"
+                :aria-selected="index === selectedSearchResult"
                 :class="{ selected: index === selectedSearchResult }"
                 @mouseenter="selectedSearchResult = index"
                 @click="closeSearch().then(() => navigateToFolder(result.folderId))"
@@ -846,17 +866,29 @@ onUnmounted(() => {
                 v-else
                 :id="`search-result-${index}`"
                 :href="result.url"
+                role="option"
+                :aria-selected="index === selectedSearchResult"
                 :class="{ selected: index === selectedSearchResult }"
                 @mouseenter="selectedSearchResult = index"
               >
                 <span aria-hidden="true">↗</span>
                 <span
                   ><strong>{{ result.title }}</strong
-                  ><small>{{ result.folderPath }}</small></span
+                  ><small>{{ result.folderPath }}</small
+                  ><small v-if="result.context" class="search-match"
+                    ><span>{{ result.context.label }}</span> · {{ result.context.text }}</small
+                  ></span
                 >
               </a>
             </li>
           </ul>
+          <p
+            v-if="state.searchResults.length === BOOKMARK_SEARCH_RESULT_LIMIT"
+            class="search-limit"
+          >
+            Showing the top {{ BOOKMARK_SEARCH_RESULT_LIMIT }} matches. Refine your search to narrow
+            the results.
+          </p>
         </div>
       </div>
 

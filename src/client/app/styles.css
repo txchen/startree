@@ -484,11 +484,26 @@ h2 {
   white-space: nowrap;
 }
 
-.search-empty {
+.search-results .search-match {
+  color: #4d6255;
+}
+
+.search-match span {
+  font-weight: 650;
+}
+
+.search-empty,
+.search-limit {
   margin: 0;
   padding: 18px;
   color: #6c675f;
   text-align: center;
+}
+
+.search-limit {
+  padding: 7px 12px 10px;
+  border-top: 1px solid #eceeea;
+  font-size: 0.72rem;
 }
 
 .breadcrumb {

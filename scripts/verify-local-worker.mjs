@@ -113,7 +113,10 @@ try {
     throw new Error('The local Worker did not apply baseline security headers to client assets.');
   }
 
-  const browser = await chromium.launch({ headless: true });
+  const browser = await chromium.launch({
+    headless: true,
+    channel: process.env.PLAYWRIGHT_CHROMIUM_CHANNEL,
+  });
   try {
     const browserContext = await browser.newContext({ viewport: { width: 1280, height: 800 } });
     const page = await browserContext.newPage();
@@ -123,6 +126,24 @@ try {
     await page.locator('.folder-grid button').filter({ hasText: 'Reading' }).click();
     await page.waitForURL(`**/bookmarks/10000000-0000-4000-8000-000000000001`);
     await page.getByRole('heading', { level: 1, name: 'Reading' }).waitFor();
+
+    const restoredPage = await browserContext.newPage();
+    await restoredPage.goto(`http://127.0.0.1:${port}/`);
+    await restoredPage.waitForURL(`**/bookmarks/10000000-0000-4000-8000-000000000001`);
+    await restoredPage.getByRole('heading', { level: 1, name: 'Reading' }).waitFor();
+    await restoredPage.locator('.folder-grid button').filter({ hasText: 'Articles' }).click();
+    await restoredPage.waitForURL(`**/bookmarks/10000000-0000-4000-8000-000000000003`);
+    await restoredPage.close();
+
+    const immediateRestorePage = await browserContext.newPage();
+    await immediateRestorePage.goto(`http://127.0.0.1:${port}/`);
+    await immediateRestorePage.waitForURL(`**/bookmarks/10000000-0000-4000-8000-000000000003`);
+    await immediateRestorePage.getByRole('heading', { level: 1, name: 'Articles' }).waitFor();
+    await immediateRestorePage.close();
+
+    await page.goto(`http://127.0.0.1:${port}/bookmarks/10000000-0000-4000-8000-000000000001`);
+    await page.getByRole('heading', { level: 1, name: 'Reading' }).waitFor();
+
     await page.getByRole('button', { name: 'Edit', exact: true }).click();
 
     await page.getByRole('button', { name: 'New Folder' }).click();
@@ -338,7 +359,14 @@ try {
 
     const articlesTile = page.locator('.folder-tile', { hasText: 'Articles' });
     const uiFolderTile = page.locator('.folder-tile', { hasText: 'UI Folder Renamed' });
-    await uiFolderTile.dragTo(articlesTile);
+    const folderReorder = page.waitForRequest(
+      (request) =>
+        request.url().endsWith('/api/bookmarks/commands') &&
+        request.postDataJSON()?.type === 'reorderFolder',
+    );
+    await uiFolderTile.dispatchEvent('dragstart');
+    await articlesTile.dispatchEvent('drop');
+    await folderReorder;
     await page.waitForFunction(() =>
       [...document.querySelectorAll('.folder-tile')][0]?.textContent?.includes('UI Folder Renamed'),
     );
@@ -512,11 +540,29 @@ try {
       .locator('.search-results a')
       .filter({ hasText: 'Example Reference' });
     await searchBookmark.waitFor();
+    await page.getByRole('listbox', { name: 'Search results' }).waitFor();
+    if ((await searchBookmark.getAttribute('aria-selected')) !== 'true') {
+      throw new Error('Bookmark search did not expose its active option semantics.');
+    }
+    await searchBookmark.getByText(/Tag\s*·\s*Café/).waitFor();
     await assertAccessible(page, 'Bookmark search');
     if ((await searchBookmark.getAttribute('href')) !== 'https://example.com/reference') {
       throw new Error('A Bookmark search result is not a native destination anchor.');
     }
     await searchBookmark.getByText('Bookmarks / Reading').waitFor();
+    await page.evaluate(() => {
+      window.open = (url) => {
+        document.body.dataset.openedSearchUrl = String(url);
+        return null;
+      };
+    });
+    await searchInput.press('Control+Enter');
+    if (
+      (await page.locator('body').getAttribute('data-opened-search-url')) !==
+      'https://example.com/reference'
+    ) {
+      throw new Error('Control+Enter did not activate the Bookmark in a new tab.');
+    }
     await searchInput.press('Escape');
     if (await page.locator('.search-results').count()) {
       throw new Error('Escape did not close global Bookmark search.');

@@ -1,10 +1,17 @@
-import MiniSearch from 'minisearch';
+import MiniSearch, { type SearchResult } from 'minisearch';
 
 import {
   SYSTEM_ROOT_FOLDER_ID,
   type Bookmark,
   type BookmarkSnapshot,
 } from '../../shared/bookmarks/contracts';
+
+export const BOOKMARK_SEARCH_RESULT_LIMIT = 20;
+
+export type BookmarkSearchContext = {
+  label: 'URL' | 'Tag' | 'Note';
+  text: string;
+};
 
 export type BookmarkSearchResult =
   | {
@@ -23,6 +30,7 @@ export type BookmarkSearchResult =
       url: string;
       note: string;
       tags: string[];
+      context?: BookmarkSearchContext;
     };
 
 export type BookmarkSearchAdapter = {
@@ -128,25 +136,67 @@ const bookmarkDocument = (
   noteText: bookmark.note,
 });
 
-const resultFrom = (result: Record<string, unknown>): BookmarkSearchResult =>
-  result.kind === 'folder'
-    ? {
-        kind: 'folder',
-        id: String(result.id),
-        title: String(result.title),
-        folderId: String(result.folderId),
-        folderPath: String(result.folderPath),
-      }
-    : {
-        kind: 'bookmark',
-        id: String(result.id),
-        title: String(result.title),
-        folderId: String(result.folderId),
-        folderPath: String(result.folderPath),
-        url: String(result.url),
-        note: String(result.note),
-        tags: Array.isArray(result.tags) ? result.tags.map(String) : [],
-      };
+const noteExcerpt = (note: string, terms: readonly string[]): string => {
+  const compact = note.replace(/\s+/g, ' ').trim();
+  if (compact.length <= 90) return compact;
+  const lower = compact.toLocaleLowerCase();
+  const position = Math.min(
+    ...terms.map((term) => lower.indexOf(term.toLocaleLowerCase())).filter((index) => index >= 0),
+  );
+  const matchPosition = Number.isFinite(position) ? position : 0;
+  const start = Math.min(Math.max(0, matchPosition - 28), compact.length - 90);
+  const end = Math.min(compact.length, start + 90);
+  return `${start > 0 ? '…' : ''}${compact.slice(start, end)}${end < compact.length ? '…' : ''}`;
+};
+
+const contextFor = (result: SearchResult): BookmarkSearchContext | undefined => {
+  const fields = new Set(Object.values(result.match).flat());
+  if (fields.has('title')) return undefined;
+  const terms = result.terms.map((term) => term.toLocaleLowerCase());
+  if (fields.has('tagText')) {
+    const tags = Array.isArray(result.tags) ? result.tags.map(String) : [];
+    const tag = tags.find((value) =>
+      terms.some((term) => value.toLocaleLowerCase().includes(term)),
+    );
+    return { label: 'Tag', text: tag ?? tags[0] ?? '' };
+  }
+  if (fields.has('urlText')) {
+    const url = String(result.url);
+    try {
+      return { label: 'URL', text: new URL(url).hostname };
+    } catch {
+      return { label: 'URL', text: url };
+    }
+  }
+  if (fields.has('noteText')) {
+    return { label: 'Note', text: noteExcerpt(String(result.note), result.terms) };
+  }
+  return undefined;
+};
+
+const resultFrom = (result: SearchResult): BookmarkSearchResult => {
+  if (result.kind === 'folder') {
+    return {
+      kind: 'folder',
+      id: String(result.id),
+      title: String(result.title),
+      folderId: String(result.folderId),
+      folderPath: String(result.folderPath),
+    };
+  }
+  const context = contextFor(result);
+  return {
+    kind: 'bookmark',
+    id: String(result.id),
+    title: String(result.title),
+    folderId: String(result.folderId),
+    folderPath: String(result.folderPath),
+    url: String(result.url),
+    note: String(result.note),
+    tags: Array.isArray(result.tags) ? result.tags.map(String) : [],
+    ...(context ? { context } : {}),
+  };
+};
 
 export const createMiniSearchBookmarkAdapter = (): BookmarkSearchAdapter => {
   let index = createIndex();
@@ -162,7 +212,10 @@ export const createMiniSearchBookmarkAdapter = (): BookmarkSearchAdapter => {
     async search(query) {
       const normalized = query.trim();
       if (!normalized) return [];
-      return index.search(normalized).map((result) => resultFrom(result));
+      return index
+        .search(normalized)
+        .slice(0, BOOKMARK_SEARCH_RESULT_LIMIT)
+        .map((result) => resultFrom(result));
     },
     revision: () => indexedRevision,
     dispose() {

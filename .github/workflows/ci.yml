@@ -12,6 +12,8 @@ jobs:
   verify:
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    env:
+      PLAYWRIGHT_CHROMIUM_CHANNEL: chrome
     steps:
       - uses: actions/checkout@v7.0.1
       - uses: voidzero-dev/setup-vp@v1.17.0
@@ -19,7 +21,6 @@ jobs:
           node-version: '22'
           cache: true
       - run: vp install --frozen-lockfile
-      - run: npx playwright install --with-deps chromium
       - run: vp run check
       - run: vp run test
       - run: vp run build

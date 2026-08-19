@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { SYSTEM_ROOT_FOLDER_ID, type BookmarkSnapshot } from '../../shared/bookmarks/contracts';
-import { createMiniSearchBookmarkAdapter } from './bookmark-search';
+import { BOOKMARK_SEARCH_RESULT_LIMIT, createMiniSearchBookmarkAdapter } from './bookmark-search';
 
 const folderId = '10000000-0000-4000-8000-000000000001';
 const childFolderId = '10000000-0000-4000-8000-000000000002';
@@ -84,11 +84,16 @@ describe('Bookmark search Adapter Interface', () => {
           kind: 'bookmark',
           id: '20000000-0000-4000-8000-000000000001',
           folderPath: 'Bookmarks / Research / Browsers',
+          context: { label: 'URL', text: 'title.example' },
         }),
       ]),
     );
     await expect(search.search('Café')).resolves.toMatchObject([
-      { id: '20000000-0000-4000-8000-000000000001', tags: ['Café'] },
+      {
+        id: '20000000-0000-4000-8000-000000000001',
+        tags: ['Café'],
+        context: { label: 'Tag', text: 'Café' },
+      },
     ]);
     await expect(search.search('needle')).resolves.toHaveLength(2);
   });
@@ -103,6 +108,27 @@ describe('Bookmark search Adapter Interface', () => {
       '20000000-0000-4000-8000-000000000001',
       '20000000-0000-4000-8000-000000000002',
     ]);
+    expect(results[0]).not.toHaveProperty('context');
+    expect(results[1]).toMatchObject({
+      context: { label: 'Note', text: 'A needle appears only in this Note' },
+    });
+  });
+
+  it('returns only the highest-ranked result window', async () => {
+    const search = createMiniSearchBookmarkAdapter();
+    const source = snapshot();
+    await search.replace({
+      ...source,
+      bookmarks: Array.from({ length: BOOKMARK_SEARCH_RESULT_LIMIT + 5 }, (_, index) => ({
+        ...source.bookmarks[0]!,
+        id: `20000000-0000-4000-8000-${String(index + 100).padStart(12, '0')}`,
+        title: `Shared result ${index}`,
+        rank: String(index).padStart(4, '0'),
+      })),
+      tags: [],
+    });
+
+    await expect(search.search('Shared')).resolves.toHaveLength(BOOKMARK_SEARCH_RESULT_LIMIT);
   });
 
   it('disposes the previous revision index when a replacement arrives', async () => {
