@@ -26,6 +26,7 @@ const clearAndLogOut = async () => {
   <div class="shell">
     <header class="app-bar">
       <RouterLink class="brand" to="/bookmarks" aria-label="Startree home">
+        <img class="brand-mark" src="/brand-mark.svg" alt="" />
         <span>Startree</span>
       </RouterLink>
       <div class="session-actions">

@@ -48,8 +48,14 @@ a {
   display: inline-flex;
   align-items: center;
   width: fit-content;
+  gap: 8px;
   font-size: 0.92rem;
   font-weight: 680;
+}
+
+.brand-mark {
+  width: 24px;
+  height: 24px;
 }
 
 .session-actions {

@@ -100,7 +100,11 @@ try {
 
   const clientResponse = await fetch(`http://127.0.0.1:${port}/bookmarks/foundation`);
   const clientHtml = await clientResponse.text();
-  if (!clientResponse.ok || !clientHtml.includes('<div id="app"></div>')) {
+  if (
+    !clientResponse.ok ||
+    !clientHtml.includes('<div id="app"></div>') ||
+    !clientHtml.includes('rel="icon" href="/brand-mark.svg"')
+  ) {
     throw new Error(
       'The local Worker did not serve the client application for an HTML5 history route.',
     );
@@ -222,6 +226,7 @@ try {
     await page.getByRole('link', { name: /UI Bookmark Edited/ }).waitFor();
 
     await createAndVerifyHostileBookmark(page);
+    await page.locator('.write-status.pending').waitFor({ state: 'detached' });
 
     const bookmarkCards = page.locator('.bookmark-card-shell');
     const firstBookmarkId = await bookmarkCards.nth(0).getAttribute('data-bookmark-id');
