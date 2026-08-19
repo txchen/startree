@@ -66,6 +66,7 @@ const stateModule = createBookmarkState({
 const state = shallowRef<BookmarkStateView>(stateModule.getState());
 let unsubscribe: (() => void) | undefined;
 let desktopMedia: MediaQueryList | undefined;
+let navigatingToFolderId: string | undefined;
 const updateDesktopEditing = () => {
   desktopEditingAvailable.value = desktopMedia?.matches ?? false;
 };
@@ -151,8 +152,13 @@ const closeDrawer = () => {
 
 const navigateToFolder = async (folderId: string) => {
   drawerOpen.value = false;
-  if (!(await stateModule.selectFolder(folderId))) return;
-  await router.push(folderLocation(folderId));
+  navigatingToFolderId = folderId;
+  try {
+    if (!(await stateModule.selectFolder(folderId))) return;
+    await router.push(folderLocation(folderId));
+  } finally {
+    if (navigatingToFolderId === folderId) navigatingToFolderId = undefined;
+  }
 };
 
 const toggleFolder = async (folderId: string) => {
@@ -684,6 +690,7 @@ onMounted(async () => {
       initialized.value &&
       replacement.status === 'ready' &&
       selectedFolderId &&
+      selectedFolderId !== navigatingToFolderId &&
       (routeFolderId() ?? SYSTEM_ROOT_FOLDER_ID) !== selectedFolderId
     ) {
       void router.replace(folderLocation(selectedFolderId));

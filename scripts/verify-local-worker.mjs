@@ -123,8 +123,31 @@ try {
     await page.goto(`http://127.0.0.1:${port}/bookmarks`);
     await page.getByRole('heading', { level: 1, name: 'Bookmarks' }).waitFor();
     await assertAccessible(page, 'Bookmarks Page');
+    await page.evaluate(() => {
+      const replaceState = history.replaceState.bind(history);
+      document.body.dataset.folderNavigationTargetReplaceCount = '0';
+      history.replaceState = (...arguments_) => {
+        const url = arguments_[2];
+        if (
+          url &&
+          new URL(String(url), location.href).pathname ===
+            '/bookmarks/10000000-0000-4000-8000-000000000001'
+        ) {
+          document.body.dataset.folderNavigationTargetReplaceCount = String(
+            Number(document.body.dataset.folderNavigationTargetReplaceCount) + 1,
+          );
+        }
+        return replaceState(...arguments_);
+      };
+    });
     await page.locator('.folder-grid button').filter({ hasText: 'Reading' }).click();
     await page.waitForURL(`**/bookmarks/10000000-0000-4000-8000-000000000001`);
+    if (
+      (await page.locator('body').getAttribute('data-folder-navigation-target-replace-count')) !==
+      '0'
+    ) {
+      throw new Error('Folder navigation raced an unsolicited history replacement.');
+    }
     await page.getByRole('heading', { level: 1, name: 'Reading' }).waitFor();
 
     const restoredPage = await browserContext.newPage();

@@ -821,8 +821,8 @@ export const createBookmarkState = (adapters: {
       state.selectedFolderId = folderId;
       state.status = 'ready';
       state.notice = null;
-      await writeNavigation();
       emit();
+      await writeNavigation();
       return true;
     },
     async toggleFolderExpanded(folderId) {
