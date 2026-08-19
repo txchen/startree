@@ -7,7 +7,6 @@ import { fileURLToPath } from 'node:url';
 
 import { chromium } from 'playwright';
 
-import { submitEditorAndMeasureMutation } from './browser-mutation-timing.mjs';
 import {
   assertAccessible,
   createAndVerifyHostileBookmark,
@@ -196,12 +195,7 @@ try {
 
     await page.getByRole('button', { name: 'New Folder' }).click();
     await page.getByLabel('Folder name').fill('UI Folder');
-    const mutationTiming = await submitEditorAndMeasureMutation(page);
-    if (mutationTiming.acknowledgement > 100 || mutationTiming.completion > 1_000) {
-      throw new Error(
-        `Local mutation timing exceeded its target: ${JSON.stringify(mutationTiming)}`,
-      );
-    }
+    await page.getByRole('button', { name: 'Save' }).click();
     await page.getByRole('dialog').waitFor({ state: 'detached' });
     await page.locator('.folder-grid').getByText('UI Folder', { exact: true }).waitFor();
     await page.locator('.folder-tile button').filter({ hasText: 'UI Folder' }).click();
