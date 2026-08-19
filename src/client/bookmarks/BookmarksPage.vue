@@ -24,6 +24,11 @@ import FolderNavigation from './FolderNavigation.vue';
 
 const route = useRoute();
 const router = useRouter();
+const SIDEBAR_WIDTH_STORAGE_KEY = 'startree-folder-sidebar-width';
+const SIDEBAR_MIN_WIDTH = 180;
+const SIDEBAR_MAX_WIDTH = 420;
+const SIDEBAR_DEFAULT_WIDTH = 220;
+const SIDEBAR_KEYBOARD_STEP = 16;
 const drawerOpen = ref(false);
 const mobileFolderButton = ref<HTMLButtonElement>();
 const drawerCloseButton = ref<HTMLButtonElement>();
@@ -39,8 +44,13 @@ const editor = ref<{
 const editorDraft = ref<BookmarkEditorValue>({});
 const editorInitialValue = ref<BookmarkEditorValue>({});
 const desktopEditingAvailable = ref(false);
+const sidebarWidth = ref(SIDEBAR_DEFAULT_WIDTH);
+const resizingSidebar = ref(false);
+let resizePointerId: number | null = null;
+let resizeStartX = 0;
+let resizeStartWidth = SIDEBAR_DEFAULT_WIDTH;
 const editMode = ref(false);
-const dragged = ref<{ kind: 'folder' | 'bookmark'; id: string } | null>(null);
+const dragged = ref<{ kind: 'folder' | 'bookmark'; id: string; index: number } | null>(null);
 const moveEditor = ref<{ kind: 'folder' | 'bookmark'; id: string } | null>(null);
 const moveDestinationId = ref(SYSTEM_ROOT_FOLDER_ID);
 const moveBeforeId = ref('');
@@ -58,6 +68,50 @@ let unsubscribe: (() => void) | undefined;
 let desktopMedia: MediaQueryList | undefined;
 const updateDesktopEditing = () => {
   desktopEditingAvailable.value = desktopMedia?.matches ?? false;
+};
+
+const clampSidebarWidth = (value: number) =>
+  Math.min(SIDEBAR_MAX_WIDTH, Math.max(SIDEBAR_MIN_WIDTH, Math.round(value)));
+
+const persistSidebarWidth = () => {
+  try {
+    localStorage.setItem(SIDEBAR_WIDTH_STORAGE_KEY, String(sidebarWidth.value));
+  } catch {
+    // Resizing still works when browser storage is unavailable.
+  }
+};
+
+const startSidebarResize = (event: PointerEvent) => {
+  if (event.button !== 0) return;
+  resizePointerId = event.pointerId;
+  resizeStartX = event.clientX;
+  resizeStartWidth = sidebarWidth.value;
+  resizingSidebar.value = true;
+  (event.currentTarget as HTMLElement).setPointerCapture(event.pointerId);
+};
+
+const resizeSidebar = (event: PointerEvent) => {
+  if (event.pointerId !== resizePointerId) return;
+  sidebarWidth.value = clampSidebarWidth(resizeStartWidth + event.clientX - resizeStartX);
+};
+
+const finishSidebarResize = (event: PointerEvent) => {
+  if (event.pointerId !== resizePointerId) return;
+  resizePointerId = null;
+  resizingSidebar.value = false;
+  persistSidebarWidth();
+};
+
+const resizeSidebarWithKeyboard = (event: KeyboardEvent) => {
+  let width: number | undefined;
+  if (event.key === 'ArrowLeft') width = sidebarWidth.value - SIDEBAR_KEYBOARD_STEP;
+  if (event.key === 'ArrowRight') width = sidebarWidth.value + SIDEBAR_KEYBOARD_STEP;
+  if (event.key === 'Home') width = SIDEBAR_MIN_WIDTH;
+  if (event.key === 'End') width = SIDEBAR_MAX_WIDTH;
+  if (width === undefined) return;
+  event.preventDefault();
+  sidebarWidth.value = clampSidebarWidth(width);
+  persistSidebarWidth();
 };
 
 const searchOpen = computed(() => state.value.searchQuery.trim().length > 0);
@@ -208,16 +262,46 @@ const reorderBookmark = async (bookmarkId: string, beforeBookmarkId?: string) =>
   });
 };
 
-const dropFolder = async (beforeFolderId?: string) => {
-  const active = dragged.value;
-  dragged.value = null;
-  if (active?.kind === 'folder') await reorderFolder(active.id, beforeFolderId);
+const beforeIdForDrop = (
+  movingIndex: number,
+  targetId?: string,
+  targetIndex?: number,
+  nextId?: string,
+) => {
+  if (!targetId) return undefined;
+  if (targetIndex === undefined || movingIndex >= targetIndex) return targetId;
+  return nextId;
 };
 
-const dropBookmark = async (beforeBookmarkId?: string) => {
+const nextSiblingId = (event: DragEvent, attribute: string) => {
+  const sibling = (event.currentTarget as HTMLElement | null)?.nextElementSibling;
+  return sibling instanceof HTMLElement ? (sibling.dataset[attribute] ?? undefined) : undefined;
+};
+
+const dropFolder = async (beforeFolderId?: string, targetIndex?: number, nextFolderId?: string) => {
   const active = dragged.value;
   dragged.value = null;
-  if (active?.kind === 'bookmark') await reorderBookmark(active.id, beforeBookmarkId);
+  if (active?.kind === 'folder') {
+    await reorderFolder(
+      active.id,
+      beforeIdForDrop(active.index, beforeFolderId, targetIndex, nextFolderId),
+    );
+  }
+};
+
+const dropBookmark = async (
+  beforeBookmarkId?: string,
+  targetIndex?: number,
+  nextBookmarkId?: string,
+) => {
+  const active = dragged.value;
+  dragged.value = null;
+  if (active?.kind === 'bookmark') {
+    await reorderBookmark(
+      active.id,
+      beforeIdForDrop(active.index, beforeBookmarkId, targetIndex, nextBookmarkId),
+    );
+  }
 };
 
 const openMoveEditor = (kind: 'folder' | 'bookmark', id: string) => {
@@ -576,6 +660,14 @@ const emptyTrash = async () => {
 };
 
 onMounted(async () => {
+  try {
+    const storedSidebarWidth = Number(localStorage.getItem(SIDEBAR_WIDTH_STORAGE_KEY));
+    if (Number.isFinite(storedSidebarWidth) && storedSidebarWidth > 0) {
+      sidebarWidth.value = clampSidebarWidth(storedSidebarWidth);
+    }
+  } catch {
+    // Use the default width when browser storage is unavailable.
+  }
   desktopMedia = window.matchMedia('(min-width: 761px)');
   desktopMedia.addEventListener('change', updateDesktopEditing);
   updateDesktopEditing();
@@ -618,14 +710,18 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <section class="bookmarks-page">
+  <section class="bookmarks-page" :class="{ 'sidebar-resizing': resizingSidebar }">
     <button ref="mobileFolderButton" class="mobile-folder-button" type="button" @click="openDrawer">
       <span aria-hidden="true">☰</span> Folders
     </button>
 
-    <aside class="folder-sidebar" aria-label="Folders">
+    <aside
+      id="folder-sidebar"
+      class="folder-sidebar"
+      aria-label="Folders"
+      :style="{ width: `${sidebarWidth}px` }"
+    >
       <div class="sidebar-heading">
-        <span class="eyebrow">Library</span>
         <h2>Folders</h2>
       </div>
       <FolderNavigation
@@ -636,6 +732,23 @@ onUnmounted(() => {
         @toggle="toggleFolder"
       />
       <button class="trash-navigation" type="button" @click="openTrash">Trash</button>
+      <div
+        class="sidebar-resizer"
+        role="separator"
+        aria-label="Resize Folder sidebar"
+        aria-controls="folder-sidebar"
+        aria-orientation="vertical"
+        :aria-valuemin="SIDEBAR_MIN_WIDTH"
+        :aria-valuemax="SIDEBAR_MAX_WIDTH"
+        :aria-valuenow="sidebarWidth"
+        tabindex="0"
+        @keydown="resizeSidebarWithKeyboard"
+        @pointerdown="startSidebarResize"
+        @pointermove="resizeSidebar"
+        @pointerup="finishSidebarResize"
+        @pointercancel="finishSidebarResize"
+        @lostpointercapture="finishSidebarResize"
+      ></div>
     </aside>
 
     <div class="bookmarks-workspace">
@@ -689,9 +802,10 @@ onUnmounted(() => {
       </div>
 
       <div v-if="!trashOpen" class="bookmark-search">
-        <label for="bookmark-search-input">Search every Folder and Bookmark</label>
+        <label class="visually-hidden" for="bookmark-search-input"
+          >Search every Folder and Bookmark</label
+        >
         <div class="search-field">
-          <span aria-hidden="true">⌕</span>
           <input
             id="bookmark-search-input"
             ref="searchInput"
@@ -722,7 +836,7 @@ onUnmounted(() => {
                 @mouseenter="selectedSearchResult = index"
                 @click="closeSearch().then(() => navigateToFolder(result.folderId))"
               >
-                <span aria-hidden="true">⌑</span>
+                <span class="folder-glyph" aria-hidden="true"></span>
                 <span
                   ><strong>{{ result.title }}</strong
                   ><small>{{ result.folderPath }}</small></span
@@ -748,10 +862,7 @@ onUnmounted(() => {
 
       <section v-if="trashOpen" class="trash-view" aria-labelledby="bookmarks-title">
         <header class="library-heading">
-          <div>
-            <span class="eyebrow">Online only</span>
-            <h1 id="bookmarks-title">Trash</h1>
-          </div>
+          <h1 id="bookmarks-title">Trash</h1>
           <div class="trash-actions">
             <button type="button" @click="closeTrash">Back to Bookmarks</button>
             <button
@@ -764,7 +875,6 @@ onUnmounted(() => {
           </div>
         </header>
         <div v-if="state.trashStatus === 'offline'" class="library-state empty">
-          <span class="state-mark" aria-hidden="true">⌁</span>
           <h2>Trash is online only</h2>
           <p>
             Reconnect to review or change authoritative Trash. Offline snapshots do not include it.
@@ -778,7 +888,6 @@ onUnmounted(() => {
           <button type="button" @click="stateModule.loadTrash()">Try again</button>
         </div>
         <div v-else-if="!state.trash?.roots.length" class="library-state empty">
-          <span class="state-mark" aria-hidden="true">✓</span>
           <h2>Trash is empty</h2>
           <p>Deleted Bookmarks and Folder trees will appear here for 30 days.</p>
         </div>
@@ -809,13 +918,11 @@ onUnmounted(() => {
       ></div>
 
       <div v-else-if="state.status === 'loading'" class="library-state" aria-live="polite">
-        <span class="state-mark" aria-hidden="true">⋯</span>
         <h1 id="bookmarks-title">Growing your library</h1>
         <p>Loading Bookmarks…</p>
       </div>
 
       <div v-else-if="state.status === 'error'" class="library-state">
-        <span class="state-mark" aria-hidden="true">!</span>
         <h1 id="bookmarks-title">The library could not be loaded</h1>
         <p v-if="state.syncStatus === 'offline'">
           Go online once to retain this private library for offline reading.
@@ -829,7 +936,6 @@ onUnmounted(() => {
       </div>
 
       <div v-else-if="state.status === 'not-found'" class="library-state">
-        <span class="state-mark" aria-hidden="true">?</span>
         <h1 id="bookmarks-title">Folder not found</h1>
         <p>This Folder may have moved or been deleted.</p>
         <button type="button" @click="navigateToFolder(SYSTEM_ROOT_FOLDER_ID)">
@@ -838,7 +944,7 @@ onUnmounted(() => {
       </div>
 
       <template v-else>
-        <nav class="breadcrumb" aria-label="Breadcrumb">
+        <nav v-if="state.breadcrumbs.length > 1" class="breadcrumb" aria-label="Breadcrumb">
           <template v-for="(folder, index) in state.breadcrumbs" :key="folder.id">
             <span v-if="index" aria-hidden="true">/</span>
             <button
@@ -853,10 +959,7 @@ onUnmounted(() => {
         </nav>
 
         <header class="library-heading">
-          <div>
-            <span class="eyebrow">Current Folder</span>
-            <h1 id="bookmarks-title">{{ state.selectedFolder?.name || 'Bookmarks' }}</h1>
-          </div>
+          <h1 id="bookmarks-title">{{ state.selectedFolder?.name || 'Bookmarks' }}</h1>
           <div class="library-actions">
             <span class="item-count">
               {{ state.directFolders.length }} Folders ·
@@ -900,14 +1003,18 @@ onUnmounted(() => {
           <h2 id="folders-title">Folders</h2>
           <div class="folder-grid">
             <div
-              v-for="folder in state.directFolders"
+              v-for="(folder, index) in state.directFolders"
               :key="folder.id"
               class="folder-tile"
+              :data-folder-id="folder.id"
               :draggable="editingAvailable && editMode"
-              @dragstart="dragged = { kind: 'folder', id: folder.id }"
+              @dragstart="dragged = { kind: 'folder', id: folder.id, index }"
               @dragover="editingAvailable && editMode && $event.preventDefault()"
               @drop="
-                editingAvailable && editMode && (dropFolder(folder.id), $event.preventDefault())
+                editingAvailable &&
+                editMode &&
+                (dropFolder(folder.id, index, nextSiblingId($event, 'folderId')),
+                $event.preventDefault())
               "
             >
               <span
@@ -917,9 +1024,10 @@ onUnmounted(() => {
                 >⋮⋮</span
               >
               <button type="button" @click="navigateToFolder(folder.id)">
-                <span class="folder-icon" aria-hidden="true">⌑</span>
+                <span class="folder-icon" aria-hidden="true"
+                  ><span class="folder-glyph"></span
+                ></span>
                 <span>{{ folder.name }}</span>
-                <span aria-hidden="true">→</span>
               </button>
               <button
                 v-if="editingAvailable && editMode"
@@ -971,7 +1079,7 @@ onUnmounted(() => {
           <h2 id="saved-title">Bookmarks</h2>
           <div class="bookmark-grid">
             <BookmarkCard
-              v-for="bookmark in state.directBookmarks"
+              v-for="(bookmark, index) in state.directBookmarks"
               :key="bookmark.id"
               :bookmark="bookmark"
               :tags="state.tagsByBookmark[bookmark.id] ?? []"
@@ -979,8 +1087,8 @@ onUnmounted(() => {
               @edit="openBookmarkEditor(bookmark)"
               @move="openMoveEditor('bookmark', bookmark.id)"
               @remove="trashBookmark(bookmark)"
-              @dragstart="dragged = { kind: 'bookmark', id: bookmark.id }"
-              @drop="dropBookmark(bookmark.id)"
+              @dragstart="dragged = { kind: 'bookmark', id: bookmark.id, index }"
+              @drop="dropBookmark(bookmark.id, index, nextSiblingId($event, 'bookmarkId'))"
             />
             <div
               v-if="editingAvailable && editMode"
@@ -1000,7 +1108,6 @@ onUnmounted(() => {
           v-if="!state.directFolders.length && !state.directBookmarks.length"
           class="library-state empty"
         >
-          <span class="state-mark" aria-hidden="true">↗</span>
           <h2>
             {{
               state.selectedFolder?.id === SYSTEM_ROOT_FOLDER_ID

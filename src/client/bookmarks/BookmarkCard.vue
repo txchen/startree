@@ -8,7 +8,13 @@ const props = defineProps<{
   tags: readonly string[];
   editable: boolean;
 }>();
-const emit = defineEmits<{ edit: []; move: []; remove: []; dragstart: []; drop: [] }>();
+const emit = defineEmits<{
+  edit: [];
+  move: [];
+  remove: [];
+  dragstart: [];
+  drop: [event: DragEvent];
+}>();
 
 const faviconFailed = ref(false);
 const destination = computed(() => new URL(props.bookmark.url));
@@ -24,15 +30,21 @@ const activate = (event: MouseEvent) => {
 <template>
   <article
     class="bookmark-card-shell"
+    :data-bookmark-id="bookmark.id"
     :draggable="editable"
     @dragstart="emit('dragstart')"
     @dragover="editable && $event.preventDefault()"
-    @drop="editable && (emit('drop'), $event.preventDefault())"
+    @drop="editable && (emit('drop', $event), $event.preventDefault())"
   >
     <span v-if="editable" class="drag-handle desktop-edit-controls" aria-label="Drag Bookmark"
       >⋮⋮</span
     >
-    <a class="bookmark-card" :href="bookmark.url" @click="activate">
+    <a
+      class="bookmark-card"
+      :href="bookmark.url"
+      :draggable="editable ? false : undefined"
+      @click="activate"
+    >
       <span class="bookmark-favicon" aria-hidden="true">
         <img
           v-if="!faviconFailed"
@@ -50,7 +62,6 @@ const activate = (event: MouseEvent) => {
           <span v-for="tag in tags" :key="tag">{{ tag }}</span>
         </span>
       </span>
-      <span class="bookmark-arrow" aria-hidden="true">↗</span>
     </a>
     <button
       v-if="editable"

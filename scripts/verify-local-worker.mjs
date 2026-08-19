@@ -223,6 +223,39 @@ try {
 
     await createAndVerifyHostileBookmark(page);
 
+    const bookmarkCards = page.locator('.bookmark-card-shell');
+    const firstBookmarkId = await bookmarkCards.nth(0).getAttribute('data-bookmark-id');
+    const secondBookmarkId = await bookmarkCards.nth(1).getAttribute('data-bookmark-id');
+    const thirdBookmarkId = await bookmarkCards.nth(2).getAttribute('data-bookmark-id');
+    const downwardReorder = page.waitForRequest(
+      (request) =>
+        request.url().endsWith('/api/bookmarks/commands') &&
+        request.postDataJSON()?.type === 'reorderBookmark',
+    );
+    await bookmarkCards.nth(0).locator('.drag-handle').dragTo(bookmarkCards.nth(1));
+    const downwardCommand = (await downwardReorder).postDataJSON();
+    if (
+      downwardCommand.bookmarkId !== firstBookmarkId ||
+      downwardCommand.beforeBookmarkId !== thirdBookmarkId
+    ) {
+      throw new Error(
+        downwardCommand.bookmarkId !== firstBookmarkId
+          ? 'A downward Bookmark drag selected the wrong source.'
+          : 'A downward Bookmark drag selected the wrong destination.',
+      );
+    }
+    await page.locator('.write-status.pending').waitFor({ state: 'detached' });
+    const reorderedSnapshot = await fetch(`http://127.0.0.1:${port}/api/bookmarks/snapshot`).then(
+      (response) => response.json(),
+    );
+    const reorderedIds = reorderedSnapshot.bookmarks
+      .filter((bookmark) => bookmark.folderId === '10000000-0000-4000-8000-000000000001')
+      .sort((left, right) => left.rank.localeCompare(right.rank) || left.id.localeCompare(right.id))
+      .map((bookmark) => bookmark.id);
+    if (reorderedIds.indexOf(secondBookmarkId) >= reorderedIds.indexOf(firstBookmarkId)) {
+      throw new Error('The server did not persist the downward Bookmark reorder.');
+    }
+
     await page.route('**/api/bookmarks/commands', async (route) => {
       await delay(1_200);
       await route.continue();
@@ -300,10 +333,7 @@ try {
 
     const articlesTile = page.locator('.folder-tile', { hasText: 'Articles' });
     const uiFolderTile = page.locator('.folder-tile', { hasText: 'UI Folder Renamed' });
-    // Dispatch drag events directly so the ordering checks do not depend on pointer
-    // geometry while optimistic updates rerender both tiles.
-    await uiFolderTile.dispatchEvent('dragstart');
-    await articlesTile.dispatchEvent('drop');
+    await uiFolderTile.dragTo(articlesTile);
     await page.waitForFunction(() =>
       [...document.querySelectorAll('.folder-tile')][0]?.textContent?.includes('UI Folder Renamed'),
     );

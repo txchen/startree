@@ -4,7 +4,6 @@ import { RouterLink, RouterView } from 'vue-router';
 
 import { createIndexedDbBookmarkAdapter } from '../bookmarks/bookmark-adapters';
 import { clearLocalApplicationData } from './local-data';
-import { pageRoutes } from './routes';
 
 const loggingOut = ref(false);
 
@@ -27,21 +26,9 @@ const clearAndLogOut = async () => {
   <div class="shell">
     <header class="app-bar">
       <RouterLink class="brand" to="/bookmarks" aria-label="Startree home">
-        <span class="brand-mark" aria-hidden="true">✦</span>
         <span>Startree</span>
       </RouterLink>
-      <nav aria-label="Pages">
-        <RouterLink
-          v-for="route in pageRoutes"
-          :key="route.name?.toString()"
-          class="nav-item"
-          :to="route.path.replace('/:pathMatch(.*)*', '')"
-        >
-          {{ route.meta?.navLabel }}
-        </RouterLink>
-      </nav>
       <div class="session-actions">
-        <span class="privacy-status"><span aria-hidden="true">●</span> Private</span>
         <button
           type="button"
           :disabled="loggingOut"

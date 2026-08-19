@@ -43,7 +43,7 @@ const hasChildren = (folderId: string) =>
         </button>
         <span v-else class="tree-spacer" aria-hidden="true"></span>
         <button class="tree-folder" type="button" @click="emit('select', folder.id)">
-          <span aria-hidden="true">⌑</span>{{ folder.name }}
+          <span class="folder-glyph" aria-hidden="true"></span>{{ folder.name }}
         </button>
       </div>
       <FolderTree
