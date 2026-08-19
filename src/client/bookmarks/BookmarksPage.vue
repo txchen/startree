@@ -17,7 +17,19 @@ import {
   createFetchBookmarkAdapter,
   createIndexedDbBookmarkAdapter,
 } from './bookmark-adapters';
-import { BOOKMARK_SEARCH_RESULT_LIMIT, createWorkerBookmarkSearchAdapter } from './bookmark-search';
+import {
+  BOOKMARK_SEARCH_RESULT_LIMIT,
+  bookmarkSearchFiltersActive,
+  createWorkerBookmarkSearchAdapter,
+  EMPTY_BOOKMARK_SEARCH_FILTERS,
+  type BookmarkSearchFilters,
+} from './bookmark-search';
+import {
+  bookmarkFolderPaths,
+  bookmarkFacetsFor,
+  bookmarksMatchingUrl,
+  duplicateBookmarkGroups,
+} from './bookmark-library';
 import { createBookmarkState, type BookmarkStateView } from './bookmark-state';
 import { trapDialogFocus } from './dialog-focus';
 import FolderNavigation from './FolderNavigation.vue';
@@ -36,6 +48,9 @@ const initialized = ref(false);
 const searchInput = ref<HTMLInputElement>();
 const moveDestinationInput = ref<HTMLSelectElement>();
 const selectedSearchResult = ref(0);
+const searchFiltersOpen = ref(false);
+const selectedTagFacet = ref('');
+const selectedDomainFacet = ref('');
 const editor = ref<{
   kind: 'folder' | 'bookmark';
   folder?: BookmarkFolder;
@@ -56,6 +71,7 @@ const moveDestinationId = ref(SYSTEM_ROOT_FOLDER_ID);
 const moveBeforeId = ref('');
 let moveReturnFocus: HTMLElement | null = null;
 const trashOpen = ref(false);
+const duplicatesOpen = ref(false);
 const undoableTrash = ref<{ root: BookmarkTrashRoot; version: number } | null>(null);
 const stateModule = createBookmarkState({
   remote: createFetchBookmarkAdapter(),
@@ -114,7 +130,11 @@ const resizeSidebarWithKeyboard = (event: KeyboardEvent) => {
   persistSidebarWidth();
 };
 
-const searchOpen = computed(() => state.value.searchQuery.trim().length > 0);
+const searchOpen = computed(
+  () =>
+    state.value.searchQuery.trim().length > 0 ||
+    bookmarkSearchFiltersActive(state.value.searchFilters),
+);
 const editingAvailable = computed(
   () => desktopEditingAvailable.value && state.value.syncStatus !== 'offline',
 );
@@ -139,6 +159,27 @@ const routeFolderId = (): string | undefined => {
 const folderLocation = (folderId: string) =>
   folderId === SYSTEM_ROOT_FOLDER_ID ? '/bookmarks' : `/bookmarks/${folderId}`;
 
+const folderPaths = computed(() => bookmarkFolderPaths(state.value.folders));
+const folderPathFor = (folderId: string): string => folderPaths.value[folderId] ?? 'Bookmarks';
+
+const libraryFacets = computed(() =>
+  bookmarkFacetsFor(state.value.bookmarks, state.value.tagsByBookmark),
+);
+const duplicateGroups = computed(() => duplicateBookmarkGroups(state.value.bookmarks));
+const duplicateLocations = computed<Readonly<Record<string, string>>>(() =>
+  Object.fromEntries(
+    state.value.bookmarks.map((bookmark) => [bookmark.id, folderPathFor(bookmark.folderId)]),
+  ),
+);
+const editorDuplicateBookmarks = computed(() => {
+  if (editor.value?.kind !== 'bookmark') return [];
+  return bookmarksMatchingUrl(
+    state.value.bookmarks,
+    editorDraft.value.url ?? '',
+    editor.value.bookmark?.id,
+  );
+});
+
 const openDrawer = () => {
   drawerOpen.value = true;
   void nextTick(() => drawerCloseButton.value?.focus());
@@ -151,6 +192,8 @@ const closeDrawer = () => {
 
 const navigateToFolder = async (folderId: string) => {
   drawerOpen.value = false;
+  trashOpen.value = false;
+  duplicatesOpen.value = false;
   await router.push(folderLocation(folderId));
 };
 
@@ -160,12 +203,43 @@ const toggleFolder = async (folderId: string) => {
 
 const updateSearch = async (event: Event) => {
   selectedSearchResult.value = 0;
-  await stateModule.search((event.target as HTMLInputElement).value);
+  await stateModule.search((event.target as HTMLInputElement).value, state.value.searchFilters);
 };
 
 const closeSearch = async () => {
-  await stateModule.search('');
+  searchFiltersOpen.value = false;
+  selectedTagFacet.value = '';
+  selectedDomainFacet.value = '';
+  await stateModule.search('', EMPTY_BOOKMARK_SEARCH_FILTERS);
   selectedSearchResult.value = 0;
+};
+
+const updateSearchFilters = async (filters: BookmarkSearchFilters) => {
+  selectedSearchResult.value = 0;
+  await stateModule.search(state.value.searchQuery, filters);
+};
+
+const addSearchFilter = async (kind: 'tag' | 'domain', value: string) => {
+  if (!value) return;
+  const filters = state.value.searchFilters;
+  await updateSearchFilters({
+    tags: kind === 'tag' && !filters.tags.includes(value) ? [...filters.tags, value] : filters.tags,
+    domains:
+      kind === 'domain' && !filters.domains.includes(value)
+        ? [...filters.domains, value]
+        : filters.domains,
+  });
+  if (kind === 'tag') selectedTagFacet.value = '';
+  else selectedDomainFacet.value = '';
+};
+
+const removeSearchFilter = async (kind: 'tag' | 'domain', value: string) => {
+  const filters = state.value.searchFilters;
+  await updateSearchFilters({
+    tags: kind === 'tag' ? filters.tags.filter((tag) => tag !== value) : filters.tags,
+    domains:
+      kind === 'domain' ? filters.domains.filter((domain) => domain !== value) : filters.domains,
+  });
 };
 
 const activateSearchResult = async (openInNewTab = false) => {
@@ -212,10 +286,28 @@ const isFormControl = (target: EventTarget | null) =>
   (target.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName));
 
 const handleGlobalKeydown = (event: KeyboardEvent) => {
-  const shortcut = event.key === '/' || ((event.metaKey || event.ctrlKey) && event.key === 'k');
-  if (!shortcut || isFormControl(event.target)) return;
-  event.preventDefault();
-  void nextTick(() => searchInput.value?.focus());
+  if (isFormControl(event.target)) return;
+  const searchShortcut =
+    event.key === '/' ||
+    ((event.metaKey || event.ctrlKey) && event.key.toLocaleLowerCase() === 'k');
+  if (searchShortcut) {
+    event.preventDefault();
+    void nextTick(() => searchInput.value?.focus());
+    return;
+  }
+  const addBookmarkShortcut =
+    event.key.toLocaleLowerCase() === 'n' && !event.metaKey && !event.ctrlKey && !event.altKey;
+  if (
+    addBookmarkShortcut &&
+    editingAvailable.value &&
+    !editor.value &&
+    !moveEditor.value &&
+    !trashOpen.value &&
+    !duplicatesOpen.value
+  ) {
+    event.preventDefault();
+    openBookmarkEditor();
+  }
 };
 
 const formatSyncTime = (value: string | null) =>
@@ -489,12 +581,37 @@ const saveEditor = async (value: BookmarkEditorValue) => {
 
 const openTrash = async () => {
   trashOpen.value = true;
+  duplicatesOpen.value = false;
   editMode.value = false;
+  await closeSearch();
   await stateModule.loadTrash();
 };
 
 const closeTrash = () => {
   trashOpen.value = false;
+};
+
+const openDuplicates = async () => {
+  duplicatesOpen.value = true;
+  trashOpen.value = false;
+  editMode.value = false;
+  await closeSearch();
+};
+
+const closeDuplicates = () => {
+  duplicatesOpen.value = false;
+};
+
+const revealExistingBookmark = async (bookmark: Bookmark) => {
+  closeEditor();
+  editMode.value = false;
+  await navigateToFolder(bookmark.folderId);
+  await nextTick();
+  const card = document.querySelector<HTMLElement>(
+    `.bookmark-card-shell[data-bookmark-id="${bookmark.id}"] .bookmark-card`,
+  );
+  card?.scrollIntoView({ block: 'center' });
+  card?.focus();
 };
 
 const rememberUndoableTrash = (root: BookmarkTrashRoot, version: number) => {
@@ -742,6 +859,9 @@ onUnmounted(() => {
         @select="navigateToFolder"
         @toggle="toggleFolder"
       />
+      <button class="trash-navigation" type="button" @click="openDuplicates">
+        Duplicates <span v-if="duplicateGroups.length">{{ duplicateGroups.length }}</span>
+      </button>
       <button class="trash-navigation" type="button" @click="openTrash">Trash</button>
       <div
         class="sidebar-resizer"
@@ -812,7 +932,7 @@ onUnmounted(() => {
         </button>
       </div>
 
-      <div v-if="!trashOpen" class="bookmark-search">
+      <div v-if="!trashOpen && !duplicatesOpen" class="bookmark-search">
         <label class="visually-hidden" for="bookmark-search-input"
           >Search every Folder and Bookmark</label
         >
@@ -833,7 +953,74 @@ onUnmounted(() => {
             @input="updateSearch"
             @keydown="handleSearchKeydown"
           />
+          <button
+            class="search-filter-button"
+            type="button"
+            :aria-expanded="searchFiltersOpen"
+            aria-controls="bookmark-search-filters"
+            @click="searchFiltersOpen = !searchFiltersOpen"
+          >
+            Filters
+            <span v-if="state.searchFilters.tags.length + state.searchFilters.domains.length">
+              {{ state.searchFilters.tags.length + state.searchFilters.domains.length }}
+            </span>
+          </button>
           <kbd>/</kbd>
+        </div>
+        <div
+          v-if="state.searchFilters.tags.length || state.searchFilters.domains.length"
+          class="search-filter-chips"
+          aria-label="Active search filters"
+        >
+          <button
+            v-for="tag in state.searchFilters.tags"
+            :key="`tag:${tag}`"
+            type="button"
+            @click="removeSearchFilter('tag', tag)"
+          >
+            Tag: {{ tag }} <span aria-hidden="true">×</span>
+          </button>
+          <button
+            v-for="domain in state.searchFilters.domains"
+            :key="`domain:${domain}`"
+            type="button"
+            @click="removeSearchFilter('domain', domain)"
+          >
+            Domain: {{ domain }} <span aria-hidden="true">×</span>
+          </button>
+        </div>
+        <div v-if="searchFiltersOpen" id="bookmark-search-filters" class="search-filter-panel">
+          <label>
+            Tag
+            <select v-model="selectedTagFacet" @change="addSearchFilter('tag', selectedTagFacet)">
+              <option value="">Choose a Tag</option>
+              <option
+                v-for="facet in libraryFacets.tags"
+                :key="facet.value"
+                :value="facet.value"
+                :disabled="state.searchFilters.tags.includes(facet.value)"
+              >
+                {{ facet.value }} ({{ facet.count }})
+              </option>
+            </select>
+          </label>
+          <label>
+            Domain
+            <select
+              v-model="selectedDomainFacet"
+              @change="addSearchFilter('domain', selectedDomainFacet)"
+            >
+              <option value="">Choose a domain</option>
+              <option
+                v-for="facet in libraryFacets.domains"
+                :key="facet.value"
+                :value="facet.value"
+                :disabled="state.searchFilters.domains.includes(facet.value)"
+              >
+                {{ facet.value }} ({{ facet.count }})
+              </option>
+            </select>
+          </label>
         </div>
         <div v-if="searchOpen" class="search-results">
           <p
@@ -896,7 +1083,47 @@ onUnmounted(() => {
         </div>
       </div>
 
-      <section v-if="trashOpen" class="trash-view" aria-labelledby="bookmarks-title">
+      <section v-if="duplicatesOpen" class="duplicates-view" aria-labelledby="bookmarks-title">
+        <header class="library-heading">
+          <div>
+            <span class="eyebrow">Library maintenance</span>
+            <h1 id="bookmarks-title">Duplicate Bookmarks</h1>
+          </div>
+          <button type="button" @click="closeDuplicates">Back to Bookmarks</button>
+        </header>
+        <div v-if="!duplicateGroups.length" class="library-state empty">
+          <h2>No duplicate URLs</h2>
+          <p>Every active Bookmark currently has a distinct exact URL.</p>
+        </div>
+        <div v-else class="duplicate-groups">
+          <article v-for="group in duplicateGroups" :key="group.url" class="duplicate-group">
+            <header>
+              <strong>{{ group.url }}</strong>
+              <span>{{ group.bookmarks.length }} Bookmarks</span>
+            </header>
+            <ul>
+              <li v-for="bookmark in group.bookmarks" :key="bookmark.id">
+                <div>
+                  <strong>{{ bookmark.title }}</strong>
+                  <small>{{ folderPathFor(bookmark.folderId) }}</small>
+                  <small>
+                    Added {{ formatSyncTime(bookmark.createdAt) }}
+                    <template v-if="state.tagsByBookmark[bookmark.id]?.length">
+                      · {{ state.tagsByBookmark[bookmark.id]?.join(', ') }}
+                    </template>
+                  </small>
+                  <p v-if="bookmark.note">{{ bookmark.note }}</p>
+                </div>
+                <button v-if="editingAvailable" type="button" @click="trashBookmark(bookmark)">
+                  Move to Trash
+                </button>
+              </li>
+            </ul>
+          </article>
+        </div>
+      </section>
+
+      <section v-else-if="trashOpen" class="trash-view" aria-labelledby="bookmarks-title">
         <header class="library-heading">
           <h1 id="bookmarks-title">Trash</h1>
           <div class="trash-actions">
@@ -1001,17 +1228,15 @@ onUnmounted(() => {
               {{ state.directFolders.length }} Folders ·
               {{ state.directBookmarks.length }} Bookmarks
             </span>
-            <button
-              v-if="editingAvailable && !editMode"
-              class="edit-mode-button desktop-edit-controls"
-              type="button"
-              @click="editMode = true"
-            >
-              Edit
-            </button>
+            <div v-if="editingAvailable && !editMode" class="desktop-edit-controls">
+              <button type="button" title="Keyboard shortcut: N" @click="openBookmarkEditor()">
+                Add Bookmark
+              </button>
+              <button class="edit-mode-button" type="button" @click="editMode = true">Edit</button>
+            </div>
             <div v-else-if="editingAvailable" class="desktop-edit-controls">
               <button type="button" @click="openFolderEditor()">New Folder</button>
-              <button type="button" @click="openBookmarkEditor()">New Bookmark</button>
+              <button type="button" @click="openBookmarkEditor()">Add Bookmark</button>
               <button
                 v-if="state.selectedFolder && state.selectedFolder.id !== SYSTEM_ROOT_FOLDER_ID"
                 type="button"
@@ -1194,6 +1419,16 @@ onUnmounted(() => {
           type="button"
           @click="
             drawerOpen = false;
+            openDuplicates();
+          "
+        >
+          Duplicates <span v-if="duplicateGroups.length">{{ duplicateGroups.length }}</span>
+        </button>
+        <button
+          class="trash-navigation"
+          type="button"
+          @click="
+            drawerOpen = false;
             openTrash();
           "
         >
@@ -1203,7 +1438,9 @@ onUnmounted(() => {
     </div>
 
     <BookmarkEditorModal
-      v-if="editor && editingAvailable && editMode"
+      v-if="
+        editor && editingAvailable && (editMode || (editor.kind === 'bookmark' && !editor.bookmark))
+      "
       :key="editorKey"
       :kind="editor.kind"
       :folder="editor.folder"
@@ -1211,8 +1448,13 @@ onUnmounted(() => {
       :value="editorDraft"
       :initial-value="editorInitialValue"
       :saving="state.writeStatus === 'pending'"
+      :destination-folder-name="state.selectedFolder?.name || 'Bookmarks'"
+      :duplicate-bookmarks="editorDuplicateBookmarks"
+      :duplicate-locations="duplicateLocations"
+      :tag-suggestions="libraryFacets.tags.map((facet) => facet.value)"
       @close="closeEditor"
       @draft="editorDraft = $event"
+      @reveal-bookmark="revealExistingBookmark"
       @save="saveEditor"
     />
 

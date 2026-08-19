@@ -213,7 +213,7 @@ try {
 
     await createAndVerifyHostileFolder(page);
 
-    const newBookmarkButton = page.getByRole('button', { name: 'New Bookmark' });
+    const newBookmarkButton = page.getByRole('button', { name: 'Add Bookmark' });
     await newBookmarkButton.click();
     await assertAccessible(page, 'Bookmark editor');
     if (!(await page.getByLabel('URL').evaluate((element) => element === document.activeElement))) {
@@ -546,6 +546,31 @@ try {
       throw new Error('Done did not return the desktop Bookmarks Page to Browse Mode.');
     }
 
+    await page.locator('body').press('n');
+    const quickAddUrl = page.getByLabel('URL');
+    if (!(await quickAddUrl.evaluate((element) => element === document.activeElement))) {
+      throw new Error('The N shortcut did not open and focus Add Bookmark.');
+    }
+    await page.getByText('Saving to Reading').waitFor();
+    await quickAddUrl.fill('https://example.com/reference');
+    await quickAddUrl.blur();
+    await page.getByText('This URL is already saved.').waitFor();
+    await page.getByRole('button', { name: 'Reference', exact: true }).click();
+    if (!(await page.getByLabel(/Tags/).inputValue()).includes('Reference')) {
+      throw new Error('The Add Bookmark flow did not apply an existing Tag suggestion.');
+    }
+    await page.getByLabel('Title').fill('Duplicate Reference');
+    await page.getByLabel('Title').press('Control+Enter');
+    await page.getByRole('dialog').waitFor({ state: 'detached' });
+    await page.getByRole('link', { name: /Duplicate Reference/ }).waitFor();
+
+    await page.getByRole('button', { name: /Duplicates 1/ }).click();
+    await page.getByRole('heading', { level: 1, name: 'Duplicate Bookmarks' }).waitFor();
+    await page.getByText('https://example.com/reference', { exact: true }).waitFor();
+    await page.getByText('2 Bookmarks', { exact: true }).waitFor();
+    await assertAccessible(page, 'duplicate Bookmark review');
+    await page.getByRole('button', { name: 'Back to Bookmarks' }).click();
+
     const bookmarkAnchor = page.getByRole('link', { name: /Example Reference/ });
     if ((await bookmarkAnchor.getAttribute('href')) !== 'https://example.com/reference') {
       throw new Error('The Bookmark card is not a native destination anchor.');
@@ -554,6 +579,19 @@ try {
     await page.getByText('Café').waitFor();
 
     const searchInput = page.locator('#bookmark-search-input');
+    await page.getByRole('button', { name: 'Filters' }).click();
+    await page.getByRole('combobox', { name: 'Tag' }).selectOption('Reference');
+    await page.getByRole('button', { name: 'Tag: Reference' }).waitFor();
+    await page.getByRole('combobox', { name: 'Domain' }).selectOption('example.com');
+    await page.getByRole('button', { name: 'Domain: example.com' }).waitFor();
+    await page.locator('.search-results a').filter({ hasText: 'Example Reference' }).waitFor();
+    await page.locator('.search-results a').filter({ hasText: 'Duplicate Reference' }).waitFor();
+    await assertAccessible(page, 'filtered Bookmark search');
+    await page.getByRole('button', { name: 'Tag: Reference' }).click();
+    await page.getByRole('button', { name: 'Domain: example.com' }).click();
+    if (await page.locator('.search-results').count()) {
+      throw new Error('Removing the final search filter did not close filtered results.');
+    }
     await page.locator('body').press('/');
     if (!(await searchInput.evaluate((element) => element === document.activeElement))) {
       throw new Error('The slash shortcut did not focus global Bookmark search.');

@@ -169,6 +169,12 @@ h2 {
   text-align: left;
 }
 
+.trash-navigation span {
+  float: right;
+  color: #777b80;
+  font-size: 0.72rem;
+}
+
 .undo-notice {
   display: flex;
   align-items: center;
@@ -396,13 +402,42 @@ h2 {
 
 .search-field {
   display: grid;
-  grid-template-columns: 1fr auto;
+  grid-template-columns: 1fr auto auto;
   align-items: center;
   gap: 8px;
   padding: 0 11px;
   border: 1px solid #d8dade;
   border-radius: 7px;
   background: #fff;
+}
+
+.search-filter-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 7px;
+  border: 0;
+  border-radius: 5px;
+  color: #5f6661;
+  background: transparent;
+  cursor: pointer;
+  font-size: 0.72rem;
+}
+
+.search-filter-button:hover,
+.search-filter-button[aria-expanded='true'] {
+  background: #edf1ee;
+}
+
+.search-filter-button span {
+  display: grid;
+  min-width: 18px;
+  height: 18px;
+  place-items: center;
+  border-radius: 9px;
+  color: #fff;
+  background: #47715b;
+  font-size: 0.65rem;
 }
 
 .search-field:focus-within {
@@ -428,6 +463,51 @@ h2 {
   color: #85888c;
   background: #f6f7f8;
   font-size: 0.72rem;
+}
+
+.search-filter-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding-top: 8px;
+}
+
+.search-filter-chips button {
+  padding: 4px 7px;
+  border: 1px solid #cbd6cf;
+  border-radius: 5px;
+  color: #456050;
+  background: #edf3ef;
+  cursor: pointer;
+  font-size: 0.7rem;
+}
+
+.search-filter-panel {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 8px;
+  padding: 12px;
+  border: 1px solid #d8dade;
+  border-radius: 7px;
+  background: #f9faf9;
+}
+
+.search-filter-panel label {
+  display: grid;
+  gap: 5px;
+  color: #626760;
+  font-size: 0.72rem;
+  font-weight: 650;
+}
+
+.search-filter-panel select {
+  min-width: 0;
+  padding: 7px 8px;
+  border: 1px solid #ccd0cc;
+  border-radius: 6px;
+  background: #fff;
+  font: inherit;
 }
 
 .search-results {
@@ -748,6 +828,99 @@ h2 {
   gap: 9px;
 }
 
+.duplicates-view > .library-heading > button {
+  padding: 7px 10px;
+  border: 1px solid #9aa79c;
+  border-radius: 7px;
+  color: #294535;
+  background: transparent;
+  cursor: pointer;
+}
+
+.duplicate-groups {
+  display: grid;
+  gap: 16px;
+  margin-top: 24px;
+}
+
+.duplicate-group {
+  overflow: hidden;
+  border: 1px solid #d8dade;
+  border-radius: 9px;
+  background: #fff;
+}
+
+.duplicate-group > header,
+.duplicate-group li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+}
+
+.duplicate-group > header {
+  padding: 12px 14px;
+  border-bottom: 1px solid #e5e7e9;
+  background: #f6f7f8;
+}
+
+.duplicate-group > header strong {
+  overflow: hidden;
+  font-size: 0.78rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.duplicate-group > header span {
+  color: #6b6f74;
+  font-size: 0.72rem;
+  white-space: nowrap;
+}
+
+.duplicate-group ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.duplicate-group li {
+  padding: 13px 14px;
+}
+
+.duplicate-group li + li {
+  border-top: 1px solid #eceef0;
+}
+
+.duplicate-group li > div {
+  min-width: 0;
+}
+
+.duplicate-group li strong,
+.duplicate-group li small {
+  display: block;
+}
+
+.duplicate-group li small,
+.duplicate-group li p {
+  margin: 3px 0 0;
+  overflow: hidden;
+  color: #666a6f;
+  font-size: 0.72rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.duplicate-group li button {
+  flex: 0 0 auto;
+  padding: 6px 9px;
+  border: 1px solid #b28f82;
+  border-radius: 6px;
+  color: #784b3c;
+  background: #faf3ef;
+  cursor: pointer;
+  font-size: 0.72rem;
+}
+
 .trash-list {
   display: grid;
   gap: 10px;
@@ -997,6 +1170,74 @@ h2 {
   margin-top: 24px;
 }
 
+.editor-destination {
+  margin: -7px 0 0;
+  color: #68645c;
+  font-size: 0.76rem;
+}
+
+.duplicate-warning {
+  padding: 11px 12px;
+  border: 1px solid #c5a981;
+  border-radius: 8px;
+  background: #f3ead8;
+}
+
+.duplicate-warning > p {
+  margin: 4px 0 8px;
+  color: #675b49;
+  font-size: 0.76rem;
+}
+
+.duplicate-warning ul {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.duplicate-warning li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.duplicate-warning li span,
+.duplicate-warning li small {
+  display: block;
+}
+
+.duplicate-warning li small {
+  color: #71634e;
+  font-size: 0.7rem;
+}
+
+.duplicate-warning li button,
+.tag-suggestions button {
+  padding: 4px 7px;
+  border: 1px solid #9aa79c;
+  border-radius: 6px;
+  color: #294535;
+  background: transparent;
+  cursor: pointer;
+  font-size: 0.7rem;
+}
+
+.tag-suggestions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: -8px;
+}
+
+.tag-suggestions > span {
+  color: #716c63;
+  font-size: 0.7rem;
+}
+
 .bookmark-editor label {
   display: grid;
   gap: 7px;
@@ -1038,6 +1279,13 @@ h2 {
 .bookmark-editor footer .primary {
   color: #f8f5ee;
   background: #395c48;
+}
+
+.bookmark-editor footer .primary kbd {
+  margin-left: 7px;
+  color: rgb(248 245 238 / 72%);
+  font: inherit;
+  font-size: 0.68rem;
 }
 
 .bookmark-editor button:disabled {
@@ -1115,6 +1363,16 @@ h2 {
 
   .bookmark-grid {
     grid-template-columns: 1fr;
+  }
+
+  .search-filter-panel {
+    grid-template-columns: 1fr;
+  }
+
+  .duplicate-group > header,
+  .duplicate-group li {
+    align-items: flex-start;
+    flex-direction: column;
   }
 
   .drawer-backdrop {

@@ -16,15 +16,22 @@ const props = defineProps<{
   value: BookmarkEditorValue;
   initialValue: BookmarkEditorValue;
   saving: boolean;
+  destinationFolderName?: string;
+  duplicateBookmarks?: readonly Bookmark[];
+  duplicateLocations?: Readonly<Record<string, string>>;
+  tagSuggestions?: readonly string[];
 }>();
 
 const emit = defineEmits<{
   close: [];
   save: [value: BookmarkEditorValue];
   draft: [value: BookmarkEditorValue];
+  revealBookmark: [bookmark: Bookmark];
 }>();
 
 const firstInput = ref<HTMLInputElement>();
+const tagInput = ref<HTMLInputElement>();
+const form = ref<HTMLFormElement>();
 const name = ref(props.value.name ?? '');
 const url = ref(props.value.url ?? '');
 const title = ref(props.value.title ?? '');
@@ -53,6 +60,20 @@ const heading = computed(() =>
       ? 'Edit Bookmark'
       : 'Create Bookmark',
 );
+const selectedTagKeys = computed(
+  () =>
+    new Set(
+      tags.value
+        .split(',')
+        .map((tag) => tag.trim().toLocaleLowerCase())
+        .filter(Boolean),
+    ),
+);
+const availableTagSuggestions = computed(() =>
+  (props.tagSuggestions ?? [])
+    .filter((tag) => !selectedTagKeys.value.has(tag.toLocaleLowerCase()))
+    .slice(0, 8),
+);
 
 const requestClose = () => {
   if (props.saving) return;
@@ -71,6 +92,15 @@ const fillHostname = () => {
   }
 };
 
+const fillHostnameAfterPaste = () => {
+  void nextTick(fillHostname);
+};
+
+const addSuggestedTag = (tag: string) => {
+  tags.value = tags.value.trim() ? `${tags.value.replace(/\s*$/, '')}, ${tag}` : tag;
+  void nextTick(() => tagInput.value?.focus());
+};
+
 const submit = () => {
   emit('save', comparableValue());
 };
@@ -78,9 +108,13 @@ const submit = () => {
 watch([name, url, title, note, tags], () => emit('draft', comparableValue()));
 
 const handleKeydown = (event: KeyboardEvent) => {
-  if (event.key !== 'Escape') return;
-  event.preventDefault();
-  requestClose();
+  if (event.key === 'Escape') {
+    event.preventDefault();
+    requestClose();
+  } else if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
+    event.preventDefault();
+    form.value?.requestSubmit();
+  }
 };
 
 onMounted(() => {
@@ -113,7 +147,7 @@ onUnmounted(() => {
         </button>
       </header>
 
-      <form @submit.prevent="submit">
+      <form ref="form" @submit.prevent="submit">
         <label v-if="kind === 'folder'">
           Folder name
           <input ref="firstInput" v-model="name" required maxlength="256" />
@@ -127,17 +161,45 @@ onUnmounted(() => {
               type="url"
               required
               maxlength="8192"
+              @paste="fillHostnameAfterPaste"
               @blur="fillHostname"
             />
           </label>
+          <p v-if="!bookmark && destinationFolderName" class="editor-destination">
+            Saving to <strong>{{ destinationFolderName }}</strong>
+          </p>
+          <div v-if="duplicateBookmarks?.length" class="duplicate-warning" role="status">
+            <strong>This URL is already saved.</strong>
+            <p>You can open an existing Bookmark or save another copy.</p>
+            <ul>
+              <li v-for="existing in duplicateBookmarks" :key="existing.id">
+                <span>
+                  {{ existing.title }}
+                  <small>{{ duplicateLocations?.[existing.id] ?? 'Bookmarks' }}</small>
+                </span>
+                <button type="button" @click="emit('revealBookmark', existing)">Show</button>
+              </li>
+            </ul>
+          </div>
           <label>
             Title
             <input v-model="title" required maxlength="256" />
           </label>
           <label>
             Tags <small>Separate Tags with commas.</small>
-            <input v-model="tags" />
+            <input ref="tagInput" v-model="tags" />
           </label>
+          <div v-if="availableTagSuggestions.length" class="tag-suggestions">
+            <span>Suggestions</span>
+            <button
+              v-for="suggestion in availableTagSuggestions"
+              :key="suggestion"
+              type="button"
+              @click="addSuggestedTag(suggestion)"
+            >
+              {{ suggestion }}
+            </button>
+          </div>
           <label>
             Note
             <textarea v-model="note" maxlength="32768" rows="7"></textarea>
@@ -153,7 +215,7 @@ onUnmounted(() => {
         <footer>
           <button type="button" :disabled="saving" @click="requestClose">Cancel</button>
           <button class="primary" type="submit" :disabled="saving">
-            {{ saving ? 'Saving…' : 'Save' }}
+            {{ saving ? 'Saving…' : 'Save' }}<kbd v-if="!saving">Ctrl/⌘ ↵</kbd>
           </button>
         </footer>
       </form>

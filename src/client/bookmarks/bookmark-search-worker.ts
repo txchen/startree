@@ -22,7 +22,7 @@ self.addEventListener('message', (event: MessageEvent<SearchWorkerRequest>) => {
       return {
         requestId: event.data.requestId,
         type: 'results',
-        results: [...(await search.search(event.data.query))],
+        results: [...(await search.search(event.data.query, event.data.filters))],
       };
     } catch (error) {
       return {

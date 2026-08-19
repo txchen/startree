@@ -13,7 +13,13 @@ import {
   SYSTEM_ROOT_FOLDER_ID,
   visitBookmarkCommand,
 } from '../../shared/bookmarks/contracts';
-import type { BookmarkSearchAdapter, BookmarkSearchResult } from './bookmark-search';
+import {
+  bookmarkSearchFiltersActive,
+  EMPTY_BOOKMARK_SEARCH_FILTERS,
+  type BookmarkSearchAdapter,
+  type BookmarkSearchFilters,
+  type BookmarkSearchResult,
+} from './bookmark-search';
 
 export type BookmarkNavigation = {
   selectedFolderId: string;
@@ -82,6 +88,7 @@ export type BookmarkStateView = Readonly<{
   retainedSnapshotCompatibility: 'none' | 'compatible' | 'incompatible';
   coldLoadProgressVisible: boolean;
   searchQuery: string;
+  searchFilters: BookmarkSearchFilters;
   searchResults: readonly BookmarkSearchResult[];
   writeStatus: 'idle' | 'pending' | 'failed' | 'conflict' | 'unknown';
   writeMessage: string | null;
@@ -97,7 +104,7 @@ export type BookmarkState = {
   refresh(): Promise<void>;
   refreshAfterMutation(): Promise<void>;
   loadTrash(): Promise<void>;
-  search(query: string): Promise<void>;
+  search(query: string, filters?: BookmarkSearchFilters): Promise<void>;
   selectFolder(folderId: string): Promise<boolean>;
   toggleFolderExpanded(folderId: string): Promise<void>;
   executeCommand(command: BookmarkCommand): Promise<BookmarkCommandResult | null>;
@@ -115,6 +122,7 @@ type MutableState = {
   lastSuccessfulSyncAt: string | null;
   retainedSnapshotCompatibility: BookmarkStateView['retainedSnapshotCompatibility'];
   searchQuery: string;
+  searchFilters: BookmarkSearchFilters;
   searchResults: BookmarkSearchResult[];
   writeStatus: BookmarkStateView['writeStatus'];
   writeMessage: string | null;
@@ -209,6 +217,7 @@ const viewFor = (state: MutableState): BookmarkStateView => {
     coldLoadProgressVisible:
       state.status === 'loading' && !state.snapshot && state.syncStatus === 'syncing',
     searchQuery: state.searchQuery,
+    searchFilters: state.searchFilters,
     searchResults: state.searchResults,
     writeStatus: state.writeStatus,
     writeMessage: state.writeMessage,
@@ -236,6 +245,7 @@ export const createBookmarkState = (adapters: {
     lastSuccessfulSyncAt: null,
     retainedSnapshotCompatibility: 'none',
     searchQuery: '',
+    searchFilters: EMPTY_BOOKMARK_SEARCH_FILTERS,
     searchResults: [],
     writeStatus: 'idle',
     writeMessage: null,
@@ -295,8 +305,10 @@ export const createBookmarkState = (adapters: {
     state.retainedSnapshotCompatibility = 'compatible';
     if (adapters.search) {
       await adapters.search.replace(snapshot);
-      if (state.searchQuery) {
-        state.searchResults = [...(await adapters.search.search(state.searchQuery))];
+      if (state.searchQuery || bookmarkSearchFiltersActive(state.searchFilters)) {
+        state.searchResults = [
+          ...(await adapters.search.search(state.searchQuery, state.searchFilters)),
+        ];
       }
     }
     if (
@@ -643,8 +655,10 @@ export const createBookmarkState = (adapters: {
         await adapters.storage.writeSnapshot(state.snapshot, { synchronizedAt });
         if (adapters.search) {
           await adapters.search.replace(state.snapshot);
-          if (state.searchQuery) {
-            state.searchResults = [...(await adapters.search.search(state.searchQuery))];
+          if (state.searchQuery || bookmarkSearchFiltersActive(state.searchFilters)) {
+            state.searchResults = [
+              ...(await adapters.search.search(state.searchQuery, state.searchFilters)),
+            ];
           }
         }
         state.lastSuccessfulSyncAt = synchronizedAt;
@@ -797,15 +811,19 @@ export const createBookmarkState = (adapters: {
     refresh,
     refreshAfterMutation: refresh,
     loadTrash,
-    async search(query) {
+    async search(query, filters = state.searchFilters) {
       const currentRequest = ++searchRequest;
       state.searchQuery = query;
-      if (!query.trim() || !adapters.search) {
+      state.searchFilters = {
+        tags: [...filters.tags],
+        domains: [...filters.domains],
+      };
+      if ((!query.trim() && !bookmarkSearchFiltersActive(filters)) || !adapters.search) {
         state.searchResults = [];
         emit();
         return;
       }
-      const results = await adapters.search.search(query);
+      const results = await adapters.search.search(query, filters);
       if (currentRequest !== searchRequest) return;
       state.searchResults = [...results];
       emit();

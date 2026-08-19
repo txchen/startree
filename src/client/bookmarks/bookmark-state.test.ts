@@ -481,6 +481,35 @@ describe('Bookmark state Module Interface', () => {
     state.dispose();
   });
 
+  it('retains active search filters when a replacement snapshot is promoted', async () => {
+    const remote = createMemoryBookmarkRemoteAdapter(snapshot());
+    const state = createBookmarkState({
+      remote,
+      storage: createMemoryBookmarkStorageAdapter(),
+      lifecycle: createMemoryBookmarkLifecycleAdapter(),
+      search: createMiniSearchBookmarkAdapter(),
+    });
+    await state.initialize();
+    await state.search('', { tags: ['Reference'], domains: ['example.com'] });
+    expect(state.getState()).toMatchObject({
+      searchFilters: { tags: ['Reference'], domains: ['example.com'] },
+      searchResults: [{ id: '20000000-0000-4000-8000-000000000001' }],
+    });
+
+    remote.setSnapshot({
+      ...snapshot(2),
+      bookmarks: snapshot(2).bookmarks.filter((bookmark) => bookmark.url.includes('example.org')),
+      tags: [],
+    });
+    await state.refresh();
+
+    expect(state.getState()).toMatchObject({
+      searchFilters: { tags: ['Reference'], domains: ['example.com'] },
+      searchResults: [],
+    });
+    state.dispose();
+  });
+
   it('optimistically presents a write immediately and merges its authoritative result', async () => {
     let settle:
       | ((value: import('../../shared/bookmarks/contracts').BookmarkCommandResult) => void)

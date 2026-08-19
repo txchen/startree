@@ -131,6 +131,29 @@ describe('Bookmark search Adapter Interface', () => {
     await expect(search.search('Shared')).resolves.toHaveLength(BOOKMARK_SEARCH_RESULT_LIMIT);
   });
 
+  it('filters Bookmark results by Tag and domain before applying the result window', async () => {
+    const search = createMiniSearchBookmarkAdapter();
+    await search.replace(snapshot());
+
+    await expect(search.search('', { tags: ['café'], domains: [] })).resolves.toMatchObject([
+      {
+        kind: 'bookmark',
+        id: '20000000-0000-4000-8000-000000000001',
+      },
+    ]);
+    await expect(
+      search.search('needle', { tags: [], domains: ['notes.example'] }),
+    ).resolves.toMatchObject([
+      {
+        kind: 'bookmark',
+        id: '20000000-0000-4000-8000-000000000002',
+      },
+    ]);
+    await expect(
+      search.search('', { tags: ['Café'], domains: ['notes.example'] }),
+    ).resolves.toEqual([]);
+  });
+
   it('disposes the previous revision index when a replacement arrives', async () => {
     const search = createMiniSearchBookmarkAdapter();
     await search.replace(snapshot(1));

@@ -5,6 +5,7 @@ import {
   type Bookmark,
   type BookmarkSnapshot,
 } from '../../shared/bookmarks/contracts';
+import { bookmarkDomain } from './bookmark-library';
 
 export const BOOKMARK_SEARCH_RESULT_LIMIT = 20;
 
@@ -12,6 +13,19 @@ export type BookmarkSearchContext = {
   label: 'URL' | 'Tag' | 'Note';
   text: string;
 };
+
+export type BookmarkSearchFilters = Readonly<{
+  tags: readonly string[];
+  domains: readonly string[];
+}>;
+
+export const EMPTY_BOOKMARK_SEARCH_FILTERS: BookmarkSearchFilters = {
+  tags: [],
+  domains: [],
+};
+
+export const bookmarkSearchFiltersActive = (filters: BookmarkSearchFilters): boolean =>
+  filters.tags.length > 0 || filters.domains.length > 0;
 
 export type BookmarkSearchResult =
   | {
@@ -35,7 +49,7 @@ export type BookmarkSearchResult =
 
 export type BookmarkSearchAdapter = {
   replace(snapshot: BookmarkSnapshot): Promise<void>;
-  search(query: string): Promise<readonly BookmarkSearchResult[]>;
+  search(query: string, filters?: BookmarkSearchFilters): Promise<readonly BookmarkSearchResult[]>;
   revision(): number | null;
   dispose(): void;
 };
@@ -198,28 +212,91 @@ const resultFrom = (result: SearchResult): BookmarkSearchResult => {
   };
 };
 
+const resultFromDocument = (document: SearchDocument): BookmarkSearchResult => {
+  if (document.kind === 'folder') {
+    return {
+      kind: 'folder',
+      id: document.id,
+      title: document.title,
+      folderId: document.folderId,
+      folderPath: document.folderPath,
+    };
+  }
+  return {
+    kind: 'bookmark',
+    id: document.id,
+    title: document.title,
+    folderId: document.folderId,
+    folderPath: document.folderPath,
+    url: document.url,
+    note: document.note,
+    tags: document.tags,
+  };
+};
+
+type FilterableSearchDocument = Readonly<{
+  kind: BookmarkSearchResult['kind'];
+  url?: string;
+  tags?: readonly string[];
+}>;
+
+const matchesFilters = (
+  document: FilterableSearchDocument,
+  filters: BookmarkSearchFilters,
+): boolean => {
+  if (!bookmarkSearchFiltersActive(filters)) return true;
+  if (document.kind !== 'bookmark' || !document.url) return false;
+  const normalizedTags = new Set((document.tags ?? []).map((tag) => tag.toLocaleLowerCase()));
+  const tagMatch =
+    filters.tags.length === 0 ||
+    filters.tags.every((tag) => normalizedTags.has(tag.toLocaleLowerCase()));
+  const domainMatch =
+    filters.domains.length === 0 || filters.domains.includes(bookmarkDomain(document.url));
+  return tagMatch && domainMatch;
+};
+
 export const createMiniSearchBookmarkAdapter = (): BookmarkSearchAdapter => {
   let index = createIndex();
+  let documents: SearchDocument[] = [];
   let indexedRevision: number | null = null;
   return {
     async replace(snapshot) {
       if (snapshot.revision === indexedRevision) return;
       const replacement = createIndex();
-      replacement.addAll(documentsFor(snapshot));
+      documents = documentsFor(snapshot);
+      replacement.addAll(documents);
       index = replacement;
       indexedRevision = snapshot.revision;
     },
-    async search(query) {
+    async search(query, filters = EMPTY_BOOKMARK_SEARCH_FILTERS) {
       const normalized = query.trim();
-      if (!normalized) return [];
+      if (!normalized) {
+        return bookmarkSearchFiltersActive(filters)
+          ? documents
+              .filter((document) => matchesFilters(document, filters))
+              .slice(0, BOOKMARK_SEARCH_RESULT_LIMIT)
+              .map(resultFromDocument)
+          : [];
+      }
       return index
         .search(normalized)
+        .filter((result) =>
+          matchesFilters(
+            {
+              kind: String(result.kind) as SearchDocument['kind'],
+              url: String(result.url ?? ''),
+              tags: Array.isArray(result.tags) ? result.tags.map(String) : [],
+            },
+            filters,
+          ),
+        )
         .slice(0, BOOKMARK_SEARCH_RESULT_LIMIT)
         .map((result) => resultFrom(result));
     },
     revision: () => indexedRevision,
     dispose() {
       index = createIndex();
+      documents = [];
       indexedRevision = null;
     },
   };
@@ -227,7 +304,7 @@ export const createMiniSearchBookmarkAdapter = (): BookmarkSearchAdapter => {
 
 type SearchWorkerCommand =
   | { type: 'replace'; snapshot: BookmarkSnapshot }
-  | { type: 'search'; query: string };
+  | { type: 'search'; query: string; filters: BookmarkSearchFilters };
 type SearchWorkerRequest = SearchWorkerCommand & { requestId: number };
 
 type SearchWorkerResponse =
@@ -268,8 +345,8 @@ export const createWorkerBookmarkSearchAdapter = (
       const response = await send({ type: 'replace', snapshot });
       if (response.type === 'replaced') indexedRevision = response.revision;
     },
-    async search(query) {
-      const response = await send({ type: 'search', query });
+    async search(query, filters = EMPTY_BOOKMARK_SEARCH_FILTERS) {
+      const response = await send({ type: 'search', query, filters });
       return response.type === 'results' ? response.results : [];
     },
     revision: () => indexedRevision,
