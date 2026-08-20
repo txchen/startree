@@ -1,44 +1,57 @@
-import { readFile } from 'node:fs/promises';
+import { readFileSync } from 'node:fs';
 
-import { convertV4MiniflareOptions, Miniflare } from 'miniflare';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
 import { SYSTEM_ROOT_FOLDER_ID } from '../../shared/bookmarks/contracts';
 import { createBookmarkService } from './bookmark-service';
+import { SqliteBookmarkDatabase } from './sqlite-bookmark-database.test-support';
 
 const now = '2026-08-18T12:00:00.000Z';
 
 describe('Bookmark Service Interface', () => {
-  let miniflare: Miniflare;
-  let database: D1Database;
+  let database: SqliteBookmarkDatabase;
 
-  beforeEach(async () => {
-    miniflare = new Miniflare(
-      convertV4MiniflareOptions({
-        modules: true,
-        script: 'export default { fetch() { return new Response("ok") } }',
-        compatibilityDate: '2026-08-18',
-        compatibilityFlags: ['nodejs_compat'],
-        d1Databases: ['DB'],
-      }),
-    );
-    database = await miniflare.getD1Database('DB');
-    for (const path of [
-      'migrations/0001_initial_bookmark_schema.sql',
-      'migrations/0002_bookmark_commands.sql',
+  beforeAll(() => {
+    database = new SqliteBookmarkDatabase();
+    for (const migration of [
+      '../../../migrations/0001_initial_bookmark_schema.sql',
+      '../../../migrations/0002_bookmark_commands.sql',
     ]) {
-      const migration = await readFile(path, 'utf8');
-      for (const statement of migration
-        .split(';')
-        .map((sql) => sql.trim())
-        .filter(Boolean)) {
-        await database.prepare(statement).run();
-      }
+      database.exec(readFileSync(new URL(migration, import.meta.url), 'utf8'));
     }
   });
 
-  afterEach(async () => {
-    await miniflare.dispose();
+  afterAll(() => {
+    database.close();
+  });
+
+  beforeEach(async () => {
+    await database.batch([
+      database.prepare('DELETE FROM bookmark_tags'),
+      database.prepare('DELETE FROM bookmarks'),
+      database.prepare('DELETE FROM bookmark_sequences'),
+      database.prepare('DELETE FROM bookmark_folders WHERE id != ?').bind(SYSTEM_ROOT_FOLDER_ID),
+      database.prepare('DELETE FROM bookmark_idempotency_results'),
+      database.prepare('DELETE FROM bookmark_command_assertions'),
+      database
+        .prepare(
+          `UPDATE bookmark_folders
+             SET name = '', parent_id = NULL, rank = '0',
+                 created_at = '1970-01-01T00:00:00.000Z',
+                 modified_at = '1970-01-01T00:00:00.000Z', version = 1,
+                 trashed_at = NULL, trash_root_id = NULL,
+                 original_parent_id = NULL, original_rank = NULL
+           WHERE id = ?`,
+        )
+        .bind(SYSTEM_ROOT_FOLDER_ID),
+      database
+        .prepare(
+          `INSERT INTO bookmark_sequences (folder_id, kind, version)
+           VALUES (?, 'folders', 1), (?, 'bookmarks', 1)`,
+        )
+        .bind(SYSTEM_ROOT_FOLDER_ID, SYSTEM_ROOT_FOLDER_ID),
+      database.prepare("UPDATE bookmark_domain_state SET revision = 0 WHERE name = 'bookmarks'"),
+    ]);
   });
 
   it('returns one validated flat snapshot with active records in stable order', async () => {
@@ -151,7 +164,7 @@ describe('Bookmark Service Interface', () => {
 
   it('supports ten Folder levels, empty Folders, and maximum field sizes', async () => {
     let parentId = SYSTEM_ROOT_FOLDER_ID;
-    const statements: D1PreparedStatement[] = [];
+    const statements = [];
     for (let depth = 1; depth <= 10; depth += 1) {
       const id = `30000000-0000-4000-8000-${depth.toString().padStart(12, '0')}`;
       statements.push(
@@ -608,7 +621,7 @@ describe('Bookmark Service Interface', () => {
       { length: 11 },
       (_, index) => `83000000-0000-4000-8000-${(index + 1).toString().padStart(12, '0')}`,
     );
-    const statements: D1PreparedStatement[] = [];
+    const statements = [];
     for (let index = 0; index < ids.length; index += 1) {
       const parentId = index === 0 ? SYSTEM_ROOT_FOLDER_ID : ids[index - 1]!;
       statements.push(

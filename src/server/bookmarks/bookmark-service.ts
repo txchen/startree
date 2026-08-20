@@ -19,6 +19,11 @@ import {
   type BookmarkSnapshot,
   type BookmarkTrash,
 } from '../../shared/bookmarks/contracts';
+import type {
+  BookmarkDatabase,
+  BookmarkDatabaseResult,
+  BookmarkDatabaseStatement,
+} from './bookmark-database';
 
 export type BookmarkService = {
   getSnapshot(): Promise<BookmarkSnapshot>;
@@ -63,10 +68,10 @@ type BookmarkServiceOptions = {
   beforeCommandBatch?: () => Promise<void>;
 };
 
-const rowsAt = (results: D1Result<SnapshotRow>[], index: number): SnapshotRow[] =>
+const rowsAt = (results: BookmarkDatabaseResult<SnapshotRow>[], index: number): SnapshotRow[] =>
   results[index]?.results ?? [];
 
-const readSnapshot = async (database: D1Database): Promise<BookmarkSnapshot> => {
+const readSnapshot = async (database: BookmarkDatabase): Promise<BookmarkSnapshot> => {
   const results = await database.batch<SnapshotRow>([
     database.prepare(
       `SELECT revision
@@ -140,7 +145,7 @@ const readSnapshot = async (database: D1Database): Promise<BookmarkSnapshot> => 
   });
 };
 
-const readTrash = async (database: D1Database): Promise<BookmarkTrash> => {
+const readTrash = async (database: BookmarkDatabase): Promise<BookmarkTrash> => {
   const results = await database.batch<SnapshotRow>([
     database.prepare("SELECT revision FROM bookmark_domain_state WHERE name = 'bookmarks'"),
     database.prepare(
@@ -184,7 +189,7 @@ const readTrash = async (database: D1Database): Promise<BookmarkTrash> => {
   });
 };
 
-const folderStatement = (database: D1Database, folderId: string) =>
+const folderStatement = (database: BookmarkDatabase, folderId: string) =>
   database
     .prepare(
       `SELECT id, name, parent_id AS parentId, rank, created_at AS createdAt,
@@ -194,7 +199,7 @@ const folderStatement = (database: D1Database, folderId: string) =>
     )
     .bind(folderId);
 
-const bookmarkStatement = (database: D1Database, bookmarkId: string) =>
+const bookmarkStatement = (database: BookmarkDatabase, bookmarkId: string) =>
   database
     .prepare(
       `SELECT id, folder_id AS folderId, url, title, note, rank,
@@ -204,7 +209,7 @@ const bookmarkStatement = (database: D1Database, bookmarkId: string) =>
     )
     .bind(bookmarkId);
 
-const sequenceStatement = (database: D1Database, folderId: string) =>
+const sequenceStatement = (database: BookmarkDatabase, folderId: string) =>
   database
     .prepare(
       `SELECT folder_id AS folderId,
@@ -218,7 +223,7 @@ const sequenceStatement = (database: D1Database, folderId: string) =>
     .bind(folderId);
 
 const nextRank = async (
-  database: D1Database,
+  database: BookmarkDatabase,
   table: 'bookmark_folders' | 'bookmarks',
   parentColumn: 'parent_id' | 'folder_id',
   parentId: string,
@@ -279,7 +284,7 @@ const positionedRanks = (
 };
 
 const organizationPositions = async (
-  database: D1Database,
+  database: BookmarkDatabase,
   table: 'bookmark_folders' | 'bookmarks',
   parentColumn: 'parent_id' | 'folder_id',
   destinationId: string,
@@ -395,11 +400,11 @@ const organizationSequenceAssertion = (kind: SequenceKind, sameFolder: boolean):
        AND (SELECT version FROM bookmark_sequences WHERE folder_id = ? AND kind = '${kind}') = ?`;
 
 const incrementSequenceStatements = (
-  database: D1Database,
+  database: BookmarkDatabase,
   kind: SequenceKind,
   sourceId: string,
   destinationId: string,
-): D1PreparedStatement[] =>
+): BookmarkDatabaseStatement[] =>
   [...new Set([sourceId, destinationId])].map((folderId) =>
     database
       .prepare(
@@ -411,7 +416,7 @@ const incrementSequenceStatements = (
 type TrashDeletionPlan = { folderIds: string[]; bookmarkIds: string[] };
 
 const trashDeletionPlan = async (
-  database: D1Database,
+  database: BookmarkDatabase,
   folderRootIds: string[],
   bookmarkRootIds: string[],
 ): Promise<TrashDeletionPlan> => {
@@ -443,10 +448,10 @@ const trashDeletionPlan = async (
 };
 
 const executeTrashDeletionStatements = (
-  database: D1Database,
+  database: BookmarkDatabase,
   plan: TrashDeletionPlan,
-): D1PreparedStatement[] => {
-  const statements: D1PreparedStatement[] = [];
+): BookmarkDatabaseStatement[] => {
+  const statements: BookmarkDatabaseStatement[] = [];
   for (const folderId of plan.folderIds) {
     statements.push(
       database
@@ -480,7 +485,7 @@ const executeTrashDeletionStatements = (
 };
 
 export const createBookmarkService = (
-  database: D1Database,
+  database: BookmarkDatabase,
   options: BookmarkServiceOptions = {},
 ): BookmarkService => {
   const now = options.now ?? (() => new Date());
@@ -518,7 +523,7 @@ export const createBookmarkService = (
     result: BookmarkCommandResult,
     timestamp: string,
     expiresAt: string,
-  ): D1PreparedStatement[] => [
+  ): BookmarkDatabaseStatement[] => [
     database
       .prepare(
         `INSERT INTO bookmark_idempotency_results

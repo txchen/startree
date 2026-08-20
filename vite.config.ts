@@ -32,4 +32,22 @@ export default defineConfig({
     ignorePatterns: ['dist/**', 'worker-configuration.d.ts', 'package-lock.json'],
     singleQuote: true,
   },
+  run: {
+    tasks: {
+      'verify:local:built': {
+        command: 'node scripts/verify-local-worker.mjs',
+        dependsOn: ['build'],
+        cache: false,
+      },
+      'verify:auxiliary': {
+        command: ['npm test', 'npm run verify:migrations', 'npm run verify:config'],
+        cache: false,
+      },
+      'verify:all': {
+        command: 'node -e ""',
+        dependsOn: ['check', 'verify:performance-data', 'verify:auxiliary', 'verify:local:built'],
+        cache: false,
+      },
+    },
+  },
 });

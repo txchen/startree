@@ -21,10 +21,4 @@ jobs:
           node-version: '22'
           cache: true
       - run: vp install --frozen-lockfile
-      - run: vp run check
-      - run: vp run test
-      - run: vp run build
-      - run: vp run verify:migrations
-      - run: vp run verify:config
-      - run: vp run verify:performance-data
-      - run: vp run verify:local
+      - run: vp run verify
