@@ -30,7 +30,7 @@ export const createAndVerifyHostileBookmark = async (page) => {
   const title = '<script>window.__x1=1</script>';
   const note = '<img src=x onerror=window.__x2=1>';
   const tag = '<svg onload=window.__x3=1>';
-  await page.getByRole('button', { name: 'New Bookmark' }).click();
+  await page.getByRole('button', { name: 'Add Bookmark' }).click();
   await page.getByLabel('URL').fill('https://example.org/hostile');
   await page.getByLabel('Title').fill(title);
   await page.getByLabel(/Tags/).fill(tag);
