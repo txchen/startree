@@ -1,11 +1,16 @@
 import { describe, expect, it } from 'vitest';
 
-import { SYSTEM_ROOT_FOLDER_ID, type Bookmark } from '../../shared/bookmarks/contracts';
+import {
+  SYSTEM_ROOT_FOLDER_ID,
+  type Bookmark,
+  type BookmarkFolder,
+} from '../../shared/bookmarks/contracts';
 import {
   bookmarkFolderPaths,
   bookmarkFacetsFor,
   bookmarksMatchingUrl,
   duplicateBookmarkGroups,
+  recursiveBookmarkCountsByFolder,
 } from './bookmark-library';
 
 const bookmark = (id: string, url: string, createdAt = '2026-08-18T00:00:00.000Z'): Bookmark => ({
@@ -24,7 +29,45 @@ const firstId = '20000000-0000-4000-8000-000000000001';
 const secondId = '20000000-0000-4000-8000-000000000002';
 const thirdId = '20000000-0000-4000-8000-000000000003';
 
+const folder = (id: string, parentId: string | null, name: string): BookmarkFolder => ({
+  id,
+  parentId,
+  name,
+  rank: id,
+  createdAt: '2026-08-18T00:00:00.000Z',
+  modifiedAt: '2026-08-18T00:00:00.000Z',
+  version: 1,
+});
+
 describe('Bookmark library lenses', () => {
+  it('counts Bookmarks in each Folder and all of its descendants', () => {
+    const parentId = '10000000-0000-4000-8000-000000000001';
+    const childId = '10000000-0000-4000-8000-000000000002';
+    const emptyId = '10000000-0000-4000-8000-000000000003';
+    const bookmarks = [
+      bookmark(firstId, 'https://example.com/parent'),
+      { ...bookmark(secondId, 'https://example.com/child-one'), folderId: childId },
+      { ...bookmark(thirdId, 'https://example.com/child-two'), folderId: childId },
+    ];
+
+    expect(
+      recursiveBookmarkCountsByFolder(
+        [
+          folder(SYSTEM_ROOT_FOLDER_ID, null, ''),
+          folder(parentId, SYSTEM_ROOT_FOLDER_ID, 'Parent'),
+          folder(childId, parentId, 'Child'),
+          folder(emptyId, SYSTEM_ROOT_FOLDER_ID, 'Empty'),
+        ],
+        bookmarks,
+      ),
+    ).toEqual({
+      [childId]: 2,
+      [parentId]: 3,
+      [emptyId]: 0,
+      [SYSTEM_ROOT_FOLDER_ID]: 3,
+    });
+  });
+
   it('builds complete Folder paths once for library-wide views', () => {
     expect(
       bookmarkFolderPaths([

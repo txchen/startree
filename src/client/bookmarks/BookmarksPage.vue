@@ -29,6 +29,7 @@ import {
   bookmarkFacetsFor,
   bookmarksMatchingUrl,
   duplicateBookmarkGroups,
+  recursiveBookmarkCountsByFolder,
 } from './bookmark-library';
 import { createBookmarkState, type BookmarkStateView } from './bookmark-state';
 import { trapDialogFocus } from './dialog-focus';
@@ -164,6 +165,9 @@ const folderPathFor = (folderId: string): string => folderPaths.value[folderId] 
 
 const libraryFacets = computed(() =>
   bookmarkFacetsFor(state.value.bookmarks, state.value.tagsByBookmark),
+);
+const folderBookmarkCounts = computed(() =>
+  recursiveBookmarkCountsByFolder(state.value.folders, state.value.bookmarks),
 );
 const duplicateGroups = computed(() => duplicateBookmarkGroups(state.value.bookmarks));
 const duplicateLocations = computed<Readonly<Record<string, string>>>(() =>
@@ -856,6 +860,7 @@ onUnmounted(() => {
         :folders="state.folders"
         :selected-folder-id="state.selectedFolder?.id"
         :expanded-folder-ids="state.expandedFolderIds"
+        :bookmark-counts="folderBookmarkCounts"
         @select="navigateToFolder"
         @toggle="toggleFolder"
       />
@@ -1411,6 +1416,7 @@ onUnmounted(() => {
           :folders="state.folders"
           :selected-folder-id="state.selectedFolder?.id"
           :expanded-folder-ids="state.expandedFolderIds"
+          :bookmark-counts="folderBookmarkCounts"
           @select="navigateToFolder"
           @toggle="toggleFolder"
         />

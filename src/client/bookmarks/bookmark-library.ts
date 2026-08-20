@@ -15,6 +15,45 @@ export type BookmarkDuplicateGroup = Readonly<{
   bookmarks: readonly Bookmark[];
 }>;
 
+export const recursiveBookmarkCountsByFolder = (
+  folders: readonly BookmarkFolder[],
+  bookmarks: readonly Bookmark[],
+): Readonly<Record<string, number>> => {
+  const directCounts = new Map(folders.map((folder) => [folder.id, 0]));
+  const childIdsByFolder = new Map<string, string[]>();
+
+  for (const folder of folders) {
+    if (!folder.parentId) continue;
+    const childIds = childIdsByFolder.get(folder.parentId) ?? [];
+    childIds.push(folder.id);
+    childIdsByFolder.set(folder.parentId, childIds);
+  }
+  for (const bookmark of bookmarks) {
+    const count = directCounts.get(bookmark.folderId);
+    if (count !== undefined) directCounts.set(bookmark.folderId, count + 1);
+  }
+
+  const counts = new Map<string, number>();
+  const resolving = new Set<string>();
+  const resolve = (folderId: string): number => {
+    const existing = counts.get(folderId);
+    if (existing !== undefined) return existing;
+    if (resolving.has(folderId)) return directCounts.get(folderId) ?? 0;
+
+    resolving.add(folderId);
+    const count = (childIdsByFolder.get(folderId) ?? []).reduce(
+      (total, childId) => total + resolve(childId),
+      directCounts.get(folderId) ?? 0,
+    );
+    resolving.delete(folderId);
+    counts.set(folderId, count);
+    return count;
+  };
+
+  for (const folder of folders) resolve(folder.id);
+  return Object.fromEntries(counts);
+};
+
 export const bookmarkFolderPaths = (
   folders: readonly BookmarkFolder[],
 ): Readonly<Record<string, string>> => {

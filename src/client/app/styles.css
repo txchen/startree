@@ -275,6 +275,23 @@ h2 {
   white-space: nowrap;
 }
 
+.folder-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.folder-item-count {
+  min-width: 1.35rem;
+  flex: 0 0 auto;
+  margin-left: auto;
+  color: #5f6661;
+  font-size: 0.7rem;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
 .folder-glyph {
   position: relative;
   display: inline-block;
