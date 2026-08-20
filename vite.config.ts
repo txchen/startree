@@ -48,6 +48,11 @@ export default defineConfig({
         dependsOn: ['check', 'verify:performance-data', 'verify:auxiliary', 'verify:local:built'],
         cache: false,
       },
+      'verify:ci': {
+        command: 'node -e ""',
+        dependsOn: ['build', 'check', 'verify:performance-data', 'verify:auxiliary'],
+        cache: false,
+      },
     },
   },
 });

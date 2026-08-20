@@ -21,4 +21,23 @@ jobs:
           node-version: '22'
           cache: true
       - run: vp install --frozen-lockfile
-      - run: vp run verify
+      - run: vp run verify:ci
+
+  verify-local:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        scenario: [management, browsing]
+    env:
+      PLAYWRIGHT_CHROMIUM_CHANNEL: chrome
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: voidzero-dev/setup-vp@v1.17.0
+        with:
+          node-version: '22'
+          cache: true
+      - run: vp install --frozen-lockfile
+      - run: vp run build
+      - run: node scripts/verify-local-worker.mjs ${{ matrix.scenario }}
