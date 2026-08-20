@@ -117,8 +117,6 @@ export const createMemoryBookmarkLifecycleAdapter = (initial?: {
     now: () => Date.now(),
     setTimeout: (callback, delay) => setTimeout(callback, delay),
     clearTimeout: (handle) => clearTimeout(handle as ReturnType<typeof setTimeout>),
-    setInterval: (callback, delay) => setInterval(callback, delay),
-    clearInterval: (handle) => clearInterval(handle as ReturnType<typeof setInterval>),
     isOnline: () => online,
     isVisible: () => visible,
     subscribe(event, listener) {

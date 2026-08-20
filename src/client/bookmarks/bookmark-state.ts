@@ -57,8 +57,6 @@ export type BookmarkLifecycleAdapter = {
   now(): number;
   setTimeout(callback: () => void, delay: number): unknown;
   clearTimeout(handle: unknown): void;
-  setInterval(callback: () => void, delay: number): unknown;
-  clearInterval(handle: unknown): void;
   isOnline(): boolean;
   isVisible(): boolean;
   subscribe(event: 'online' | 'offline' | 'visibilitychange', listener: () => void): () => void;
@@ -135,8 +133,6 @@ const createDefaultLifecycleAdapter = (): BookmarkLifecycleAdapter => ({
   now: () => Date.now(),
   setTimeout: (callback, delay) => globalThis.setTimeout(callback, delay),
   clearTimeout: (handle) => globalThis.clearTimeout(handle as ReturnType<typeof setTimeout>),
-  setInterval: (callback, delay) => globalThis.setInterval(callback, delay),
-  clearInterval: (handle) => globalThis.clearInterval(handle as ReturnType<typeof setInterval>),
   isOnline: () => (typeof navigator === 'undefined' ? true : navigator.onLine !== false),
   isVisible: () =>
     typeof document === 'undefined' ? true : document.visibilityState === 'visible',
@@ -257,7 +253,7 @@ export const createBookmarkState = (adapters: {
   let routeFolderId: string | undefined;
   let refreshPromise: Promise<void> | null = null;
   let refreshStartedAt = Number.NEGATIVE_INFINITY;
-  let intervalHandle: unknown;
+  let lifecycleBound = false;
   const lifecycleUnsubscribers: Array<() => void> = [];
   let searchRequest = 0;
   let writeBusy = false;
@@ -738,7 +734,8 @@ export const createBookmarkState = (adapters: {
   };
 
   const bindLifecycle = () => {
-    if (intervalHandle !== undefined) return;
+    if (lifecycleBound) return;
+    lifecycleBound = true;
     lifecycleUnsubscribers.push(
       lifecycle.subscribe('online', () => void refresh()),
       lifecycle.subscribe('offline', () => {
@@ -757,9 +754,6 @@ export const createBookmarkState = (adapters: {
         }
       }),
     );
-    intervalHandle = lifecycle.setInterval(() => {
-      if (lifecycle.isVisible() && lifecycle.isOnline()) void refresh();
-    }, 60_000);
     if (adapters.revisionChannel) {
       lifecycleUnsubscribers.push(
         adapters.revisionChannel.subscribe((revision) => {
@@ -859,8 +853,7 @@ export const createBookmarkState = (adapters: {
       return enqueueCommand(operation.command);
     },
     dispose() {
-      if (intervalHandle !== undefined) lifecycle.clearInterval(intervalHandle);
-      intervalHandle = undefined;
+      lifecycleBound = false;
       for (const unsubscribe of lifecycleUnsubscribers.splice(0)) unsubscribe();
       adapters.search?.dispose();
       adapters.revisionChannel?.close();

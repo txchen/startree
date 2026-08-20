@@ -417,7 +417,7 @@ describe('Bookmark state Module Interface', () => {
     state.dispose();
   });
 
-  it('refreshes on reconnection, a visibility return after 60 seconds, and visible intervals', async () => {
+  it('refreshes on reconnection and a visibility return without polling while visible', async () => {
     vi.useFakeTimers();
     const lifecycle = createMemoryBookmarkLifecycleAdapter();
     const remote = createMemoryBookmarkRemoteAdapter(snapshot());
@@ -440,8 +440,8 @@ describe('Bookmark state Module Interface', () => {
     await vi.advanceTimersByTimeAsync(0);
     expect(remote.requestedRevisions).toHaveLength(3);
 
-    await vi.advanceTimersByTimeAsync(60_000);
-    expect(remote.requestedRevisions).toHaveLength(4);
+    await vi.advanceTimersByTimeAsync(5 * 60_000);
+    expect(remote.requestedRevisions).toHaveLength(3);
     state.dispose();
   });
 
