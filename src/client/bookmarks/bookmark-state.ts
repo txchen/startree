@@ -19,6 +19,7 @@ import {
   type BookmarkSearchAdapter,
   type BookmarkSearchFilters,
   type BookmarkSearchResult,
+  type BookmarkSearchScope,
 } from './bookmark-search';
 
 export type BookmarkNavigation = {
@@ -87,6 +88,7 @@ export type BookmarkStateView = Readonly<{
   coldLoadProgressVisible: boolean;
   searchQuery: string;
   searchFilters: BookmarkSearchFilters;
+  searchScope: BookmarkSearchScope;
   searchResults: readonly BookmarkSearchResult[];
   writeStatus: 'idle' | 'pending' | 'failed' | 'conflict' | 'unknown';
   writeMessage: string | null;
@@ -102,7 +104,11 @@ export type BookmarkState = {
   refresh(): Promise<void>;
   refreshAfterMutation(): Promise<void>;
   loadTrash(): Promise<void>;
-  search(query: string, filters?: BookmarkSearchFilters): Promise<void>;
+  search(
+    query: string,
+    filters?: BookmarkSearchFilters,
+    scope?: BookmarkSearchScope,
+  ): Promise<void>;
   selectFolder(folderId: string): Promise<boolean>;
   toggleFolderExpanded(folderId: string): Promise<void>;
   executeCommand(command: BookmarkCommand): Promise<BookmarkCommandResult | null>;
@@ -121,6 +127,7 @@ type MutableState = {
   retainedSnapshotCompatibility: BookmarkStateView['retainedSnapshotCompatibility'];
   searchQuery: string;
   searchFilters: BookmarkSearchFilters;
+  searchScope: BookmarkSearchScope;
   searchResults: BookmarkSearchResult[];
   writeStatus: BookmarkStateView['writeStatus'];
   writeMessage: string | null;
@@ -214,6 +221,7 @@ const viewFor = (state: MutableState): BookmarkStateView => {
       state.status === 'loading' && !state.snapshot && state.syncStatus === 'syncing',
     searchQuery: state.searchQuery,
     searchFilters: state.searchFilters,
+    searchScope: state.searchScope,
     searchResults: state.searchResults,
     writeStatus: state.writeStatus,
     writeMessage: state.writeMessage,
@@ -242,6 +250,7 @@ export const createBookmarkState = (adapters: {
     retainedSnapshotCompatibility: 'none',
     searchQuery: '',
     searchFilters: EMPTY_BOOKMARK_SEARCH_FILTERS,
+    searchScope: 'global',
     searchResults: [],
     writeStatus: 'idle',
     writeMessage: null,
@@ -269,6 +278,9 @@ export const createBookmarkState = (adapters: {
       selectedFolderId: state.selectedFolderId,
       expandedFolderIds: [...state.expandedFolderIds],
     });
+
+  const searchScopeFolderId = (): string | null =>
+    state.searchScope === 'selected-folder' ? state.selectedFolderId : null;
 
   const settleSelection = (preferredFolderId: string, explicit: boolean) => {
     const exists =
@@ -299,14 +311,6 @@ export const createBookmarkState = (adapters: {
     state.snapshot = snapshot;
     state.lastSuccessfulSyncAt = synchronizedAt;
     state.retainedSnapshotCompatibility = 'compatible';
-    if (adapters.search) {
-      await adapters.search.replace(snapshot);
-      if (state.searchQuery || bookmarkSearchFiltersActive(state.searchFilters)) {
-        state.searchResults = [
-          ...(await adapters.search.search(state.searchQuery, state.searchFilters)),
-        ];
-      }
-    }
     if (
       fromRefresh &&
       selectedWasAvailable &&
@@ -316,6 +320,18 @@ export const createBookmarkState = (adapters: {
       state.status = 'ready';
       state.notice = 'The selected Folder is no longer available. Showing Bookmarks instead.';
       await writeNavigation();
+    }
+    if (adapters.search) {
+      await adapters.search.replace(snapshot);
+      if (state.searchQuery || bookmarkSearchFiltersActive(state.searchFilters)) {
+        state.searchResults = [
+          ...(await adapters.search.search(
+            state.searchQuery,
+            state.searchFilters,
+            searchScopeFolderId(),
+          )),
+        ];
+      }
     }
   };
 
@@ -653,7 +669,11 @@ export const createBookmarkState = (adapters: {
           await adapters.search.replace(state.snapshot);
           if (state.searchQuery || bookmarkSearchFiltersActive(state.searchFilters)) {
             state.searchResults = [
-              ...(await adapters.search.search(state.searchQuery, state.searchFilters)),
+              ...(await adapters.search.search(
+                state.searchQuery,
+                state.searchFilters,
+                searchScopeFolderId(),
+              )),
             ];
           }
         }
@@ -763,6 +783,29 @@ export const createBookmarkState = (adapters: {
     }
   };
 
+  const search = async (
+    query: string,
+    filters: BookmarkSearchFilters = state.searchFilters,
+    scope: BookmarkSearchScope = state.searchScope,
+  ) => {
+    const currentRequest = ++searchRequest;
+    state.searchQuery = query;
+    state.searchFilters = {
+      tags: [...filters.tags],
+      domains: [...filters.domains],
+    };
+    state.searchScope = scope;
+    if ((!query.trim() && !bookmarkSearchFiltersActive(filters)) || !adapters.search) {
+      state.searchResults = [];
+      emit();
+      return;
+    }
+    const results = await adapters.search.search(query, filters, searchScopeFolderId());
+    if (currentRequest !== searchRequest) return;
+    state.searchResults = [...results];
+    emit();
+  };
+
   return {
     getState: () => viewFor(state),
     subscribe(listener) {
@@ -805,36 +848,31 @@ export const createBookmarkState = (adapters: {
     refresh,
     refreshAfterMutation: refresh,
     loadTrash,
-    async search(query, filters = state.searchFilters) {
-      const currentRequest = ++searchRequest;
-      state.searchQuery = query;
-      state.searchFilters = {
-        tags: [...filters.tags],
-        domains: [...filters.domains],
-      };
-      if ((!query.trim() && !bookmarkSearchFiltersActive(filters)) || !adapters.search) {
-        state.searchResults = [];
-        emit();
-        return;
-      }
-      const results = await adapters.search.search(query, filters);
-      if (currentRequest !== searchRequest) return;
-      state.searchResults = [...results];
-      emit();
-    },
+    search,
     async selectFolder(folderId) {
       if (!state.snapshot?.folders.some((folder) => folder.id === folderId)) {
         state.selectedFolderId = folderId;
         state.status = 'not-found';
         state.notice = null;
+        if (state.searchScope === 'selected-folder') {
+          searchRequest += 1;
+          state.searchResults = [];
+        }
         emit();
         return false;
       }
       state.selectedFolderId = folderId;
       state.status = 'ready';
       state.notice = null;
+      const refreshScopedSearch =
+        state.searchScope === 'selected-folder' &&
+        (state.searchQuery.trim().length > 0 || bookmarkSearchFiltersActive(state.searchFilters));
+      if (refreshScopedSearch) state.searchResults = [];
       emit();
       await writeNavigation();
+      if (refreshScopedSearch) {
+        await search(state.searchQuery, state.searchFilters, state.searchScope);
+      }
       return true;
     },
     async toggleFolderExpanded(folderId) {

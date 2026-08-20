@@ -9,6 +9,8 @@ import { bookmarkDomain } from './bookmark-library';
 
 export const BOOKMARK_SEARCH_RESULT_LIMIT = 20;
 
+export type BookmarkSearchScope = 'global' | 'selected-folder';
+
 export type BookmarkSearchContext = {
   label: 'URL' | 'Tag' | 'Note';
   text: string;
@@ -49,7 +51,11 @@ export type BookmarkSearchResult =
 
 export type BookmarkSearchAdapter = {
   replace(snapshot: BookmarkSnapshot): Promise<void>;
-  search(query: string, filters?: BookmarkSearchFilters): Promise<readonly BookmarkSearchResult[]>;
+  search(
+    query: string,
+    filters?: BookmarkSearchFilters,
+    scopeFolderId?: string | null,
+  ): Promise<readonly BookmarkSearchResult[]>;
   revision(): number | null;
   dispose(): void;
 };
@@ -59,20 +65,36 @@ type SearchDocument = BookmarkSearchResult & {
   urlText: string;
   tagText: string;
   noteText: string;
+  scopeFolderIds: string[];
 };
 
 const createIndex = () =>
   new MiniSearch<SearchDocument>({
     idField: 'documentId',
     fields: ['title', 'urlText', 'tagText', 'noteText'],
-    storeFields: ['kind', 'id', 'title', 'folderId', 'folderPath', 'url', 'note', 'tags'],
+    storeFields: [
+      'kind',
+      'id',
+      'title',
+      'folderId',
+      'folderPath',
+      'url',
+      'note',
+      'tags',
+      'scopeFolderIds',
+    ],
     searchOptions: {
       boost: { title: 12, tagText: 5, urlText: 3, noteText: 1 },
       prefix: true,
     },
   });
 
-const activeFolderPaths = (snapshot: BookmarkSnapshot): Map<string, string> => {
+type ActiveFolderDetails = Readonly<{
+  path: string;
+  scopeFolderIds: string[];
+}>;
+
+const activeFolderDetails = (snapshot: BookmarkSnapshot): Map<string, ActiveFolderDetails> => {
   const foldersByParent = new Map<string, typeof snapshot.folders>();
   for (const folder of snapshot.folders) {
     if (folder.parentId === null) continue;
@@ -80,24 +102,29 @@ const activeFolderPaths = (snapshot: BookmarkSnapshot): Map<string, string> => {
     foldersByParent.set(folder.parentId, [...siblings, folder]);
   }
 
-  const paths = new Map<string, string>([[SYSTEM_ROOT_FOLDER_ID, 'Bookmarks']]);
+  const details = new Map<string, ActiveFolderDetails>([
+    [SYSTEM_ROOT_FOLDER_ID, { path: 'Bookmarks', scopeFolderIds: [] }],
+  ]);
   const pending = [SYSTEM_ROOT_FOLDER_ID];
   while (pending.length) {
     const parentId = pending.shift();
     if (!parentId) continue;
-    const parentPath = paths.get(parentId);
-    if (!parentPath) continue;
+    const parentDetails = details.get(parentId);
+    if (!parentDetails) continue;
     for (const child of foldersByParent.get(parentId) ?? []) {
-      if (paths.has(child.id)) continue;
-      paths.set(child.id, `${parentPath} / ${child.name}`);
+      if (details.has(child.id)) continue;
+      details.set(child.id, {
+        path: `${parentDetails.path} / ${child.name}`,
+        scopeFolderIds: [...parentDetails.scopeFolderIds, parentId],
+      });
       pending.push(child.id);
     }
   }
-  return paths;
+  return details;
 };
 
 const documentsFor = (snapshot: BookmarkSnapshot): SearchDocument[] => {
-  const paths = activeFolderPaths(snapshot);
+  const folderDetails = activeFolderDetails(snapshot);
   const tagsByBookmark = new Map<string, string[]>();
   for (const tag of snapshot.tags) {
     const tags = tagsByBookmark.get(tag.bookmarkId) ?? [];
@@ -107,26 +134,32 @@ const documentsFor = (snapshot: BookmarkSnapshot): SearchDocument[] => {
 
   const documents: SearchDocument[] = [];
   for (const folder of snapshot.folders) {
-    const folderPath = paths.get(folder.id);
-    if (!folderPath || folder.id === SYSTEM_ROOT_FOLDER_ID) continue;
+    const details = folderDetails.get(folder.id);
+    if (!details || folder.id === SYSTEM_ROOT_FOLDER_ID) continue;
     documents.push({
       kind: 'folder',
       documentId: `folder:${folder.id}`,
       id: folder.id,
       title: folder.name,
       folderId: folder.id,
-      folderPath,
+      folderPath: details.path,
       urlText: '',
       tagText: '',
       noteText: '',
+      scopeFolderIds: details.scopeFolderIds,
     });
   }
 
   for (const bookmark of snapshot.bookmarks) {
-    const folderPath = paths.get(bookmark.folderId);
-    if (!folderPath) continue;
+    const details = folderDetails.get(bookmark.folderId);
+    if (!details) continue;
     const tags = tagsByBookmark.get(bookmark.id) ?? [];
-    documents.push(bookmarkDocument(bookmark, folderPath, tags));
+    documents.push(
+      bookmarkDocument(bookmark, details.path, tags, [
+        ...details.scopeFolderIds,
+        bookmark.folderId,
+      ]),
+    );
   }
   return documents;
 };
@@ -135,6 +168,7 @@ const bookmarkDocument = (
   bookmark: Bookmark,
   folderPath: string,
   tags: string[],
+  scopeFolderIds: string[],
 ): SearchDocument => ({
   kind: 'bookmark',
   documentId: `bookmark:${bookmark.id}`,
@@ -148,6 +182,7 @@ const bookmarkDocument = (
   urlText: bookmark.url,
   tagText: tags.join(' '),
   noteText: bookmark.note,
+  scopeFolderIds,
 });
 
 const noteExcerpt = (note: string, terms: readonly string[]): string => {
@@ -238,12 +273,15 @@ type FilterableSearchDocument = Readonly<{
   kind: BookmarkSearchResult['kind'];
   url?: string;
   tags?: readonly string[];
+  scopeFolderIds: readonly string[];
 }>;
 
 const matchesFilters = (
   document: FilterableSearchDocument,
   filters: BookmarkSearchFilters,
+  scopeFolderId: string | null,
 ): boolean => {
+  if (scopeFolderId && !document.scopeFolderIds.includes(scopeFolderId)) return false;
   if (!bookmarkSearchFiltersActive(filters)) return true;
   if (document.kind !== 'bookmark' || !document.url) return false;
   const normalizedTags = new Set((document.tags ?? []).map((tag) => tag.toLocaleLowerCase()));
@@ -268,12 +306,12 @@ export const createMiniSearchBookmarkAdapter = (): BookmarkSearchAdapter => {
       index = replacement;
       indexedRevision = snapshot.revision;
     },
-    async search(query, filters = EMPTY_BOOKMARK_SEARCH_FILTERS) {
+    async search(query, filters = EMPTY_BOOKMARK_SEARCH_FILTERS, scopeFolderId = null) {
       const normalized = query.trim();
       if (!normalized) {
         return bookmarkSearchFiltersActive(filters)
           ? documents
-              .filter((document) => matchesFilters(document, filters))
+              .filter((document) => matchesFilters(document, filters, scopeFolderId))
               .slice(0, BOOKMARK_SEARCH_RESULT_LIMIT)
               .map(resultFromDocument)
           : [];
@@ -286,8 +324,12 @@ export const createMiniSearchBookmarkAdapter = (): BookmarkSearchAdapter => {
               kind: String(result.kind) as SearchDocument['kind'],
               url: String(result.url ?? ''),
               tags: Array.isArray(result.tags) ? result.tags.map(String) : [],
+              scopeFolderIds: Array.isArray(result.scopeFolderIds)
+                ? result.scopeFolderIds.map(String)
+                : [],
             },
             filters,
+            scopeFolderId,
           ),
         )
         .slice(0, BOOKMARK_SEARCH_RESULT_LIMIT)
@@ -304,7 +346,12 @@ export const createMiniSearchBookmarkAdapter = (): BookmarkSearchAdapter => {
 
 type SearchWorkerCommand =
   | { type: 'replace'; snapshot: BookmarkSnapshot }
-  | { type: 'search'; query: string; filters: BookmarkSearchFilters };
+  | {
+      type: 'search';
+      query: string;
+      filters: BookmarkSearchFilters;
+      scopeFolderId: string | null;
+    };
 type SearchWorkerRequest = SearchWorkerCommand & { requestId: number };
 
 type SearchWorkerResponse =
@@ -345,8 +392,8 @@ export const createWorkerBookmarkSearchAdapter = (
       const response = await send({ type: 'replace', snapshot });
       if (response.type === 'replaced') indexedRevision = response.revision;
     },
-    async search(query, filters = EMPTY_BOOKMARK_SEARCH_FILTERS) {
-      const response = await send({ type: 'search', query, filters });
+    async search(query, filters = EMPTY_BOOKMARK_SEARCH_FILTERS, scopeFolderId = null) {
+      const response = await send({ type: 'search', query, filters, scopeFolderId });
       return response.type === 'results' ? response.results : [];
     },
     revision: () => indexedRevision,

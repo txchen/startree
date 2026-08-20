@@ -23,6 +23,7 @@ import {
   createWorkerBookmarkSearchAdapter,
   EMPTY_BOOKMARK_SEARCH_FILTERS,
   type BookmarkSearchFilters,
+  type BookmarkSearchScope,
 } from './bookmark-search';
 import {
   bookmarkFolderPaths,
@@ -214,8 +215,17 @@ const closeSearch = async () => {
   searchFiltersOpen.value = false;
   selectedTagFacet.value = '';
   selectedDomainFacet.value = '';
-  await stateModule.search('', EMPTY_BOOKMARK_SEARCH_FILTERS);
+  await stateModule.search('', EMPTY_BOOKMARK_SEARCH_FILTERS, 'global');
   selectedSearchResult.value = 0;
+};
+
+const updateSearchScope = async (event: Event) => {
+  selectedSearchResult.value = 0;
+  await stateModule.search(
+    state.value.searchQuery,
+    state.value.searchFilters,
+    (event.target as HTMLSelectElement).value as BookmarkSearchScope,
+  );
 };
 
 const updateSearchFilters = async (filters: BookmarkSearchFilters) => {
@@ -938,9 +948,7 @@ onUnmounted(() => {
       </div>
 
       <div v-if="!trashOpen && !duplicatesOpen" class="bookmark-search">
-        <label class="visually-hidden" for="bookmark-search-input"
-          >Search every Folder and Bookmark</label
-        >
+        <label class="visually-hidden" for="bookmark-search-input">Search Bookmarks</label>
         <div class="search-field">
           <input
             id="bookmark-search-input"
@@ -958,6 +966,15 @@ onUnmounted(() => {
             @input="updateSearch"
             @keydown="handleSearchKeydown"
           />
+          <select
+            class="search-scope-select"
+            :value="state.searchScope"
+            aria-label="Search scope"
+            @change="updateSearchScope"
+          >
+            <option value="global">Everywhere</option>
+            <option value="selected-folder">Current Folder</option>
+          </select>
           <button
             class="search-filter-button"
             type="button"

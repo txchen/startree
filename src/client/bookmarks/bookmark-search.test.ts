@@ -154,6 +154,20 @@ describe('Bookmark search Adapter Interface', () => {
     ).resolves.toEqual([]);
   });
 
+  it('limits results to a Folder and its descendants', async () => {
+    const search = createMiniSearchBookmarkAdapter();
+    await search.replace(snapshot());
+
+    await expect(search.search('needle', undefined, folderId)).resolves.toHaveLength(2);
+    await expect(search.search('needle', undefined, childFolderId)).resolves.toMatchObject([
+      { id: '20000000-0000-4000-8000-000000000001' },
+    ]);
+    await expect(search.search('Browsers', undefined, folderId)).resolves.toMatchObject([
+      { kind: 'folder', id: childFolderId },
+    ]);
+    await expect(search.search('Research', undefined, folderId)).resolves.toEqual([]);
+  });
+
   it('disposes the previous revision index when a replacement arrives', async () => {
     const search = createMiniSearchBookmarkAdapter();
     await search.replace(snapshot(1));

@@ -481,6 +481,34 @@ describe('Bookmark state Module Interface', () => {
     state.dispose();
   });
 
+  it('defaults to global search and follows the selected Folder when scoped locally', async () => {
+    const state = createBookmarkState({
+      remote: createMemoryBookmarkRemoteAdapter(snapshot()),
+      storage: createMemoryBookmarkStorageAdapter(),
+      lifecycle: createMemoryBookmarkLifecycleAdapter(),
+      search: createMiniSearchBookmarkAdapter(),
+    });
+    await state.initialize({ folderId: childAId });
+
+    expect(state.getState().searchScope).toBe('global');
+    await state.search('Later Bookmark');
+    expect(state.getState().searchResults.map((result) => result.id)).toContain(
+      '20000000-0000-4000-8000-000000000002',
+    );
+
+    await state.search('Later Bookmark', undefined, 'selected-folder');
+    expect(state.getState()).toMatchObject({ searchScope: 'selected-folder', searchResults: [] });
+
+    await state.selectFolder(folderId);
+    expect(state.getState().searchResults).toContainEqual(
+      expect.objectContaining({
+        kind: 'bookmark',
+        id: '20000000-0000-4000-8000-000000000002',
+      }),
+    );
+    state.dispose();
+  });
+
   it('retains active search filters when a replacement snapshot is promoted', async () => {
     const remote = createMemoryBookmarkRemoteAdapter(snapshot());
     const state = createBookmarkState({
