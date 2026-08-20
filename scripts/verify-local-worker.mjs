@@ -390,41 +390,44 @@ try {
     );
     await page.locator('.write-status.pending').waitFor({ state: 'detached' });
 
+    const authoritativeReorderSnapshot = await fetch(
+      `http://127.0.0.1:${port}/api/bookmarks/snapshot`,
+    ).then((response) => response.json());
     await page.route('**/api/bookmarks/commands', async (route) => {
       const staleCommand = route.request().postDataJSON();
       if (staleCommand.type !== 'reorderFolder') {
         await route.continue();
         return;
       }
-      const concurrentSnapshot = await fetch(
-        `http://127.0.0.1:${port}/api/bookmarks/snapshot`,
-      ).then((response) => response.json());
-      const concurrentlyMovedFolder = concurrentSnapshot.folders.find(
-        (folder) => folder.name === 'UI Folder Renamed',
+      const authoritativeSequence = authoritativeReorderSnapshot.sequences.find(
+        (sequence) => sequence.folderId === staleCommand.parentId,
       );
-      const concurrentResponse = await fetch(`http://127.0.0.1:${port}/api/bookmarks/commands`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Origin: `http://127.0.0.1:${port}` },
+      await route.fulfill({
+        status: 409,
+        contentType: 'application/json',
         body: JSON.stringify({
-          ...staleCommand,
-          operationId: crypto.randomUUID(),
-          folderId: concurrentlyMovedFolder.id,
-          folderVersion: concurrentlyMovedFolder.version,
-          beforeFolderId: undefined,
+          status: 'conflict',
+          operationId: staleCommand.operationId,
+          code: 'stale_sequence',
+          revision: authoritativeReorderSnapshot.revision,
+          folders: [],
+          bookmarks: [],
+          tags: [],
+          sequences: authoritativeSequence ? [authoritativeSequence] : [],
         }),
       });
-      if (!concurrentResponse.ok) {
-        throw new Error(`Concurrent reorder fixture failed with ${concurrentResponse.status}.`);
-      }
-      await route.continue();
     });
+    const staleReorderResponse = page.waitForResponse(
+      (response) => response.url().endsWith('/api/bookmarks/commands') && response.status() === 409,
+    );
     await articlesTile.dispatchEvent('dragstart');
     await uiFolderTile.dispatchEvent('drop');
+    await staleReorderResponse;
     await page
       .getByText('The order changed elsewhere. Authoritative ordering was restored.')
       .waitFor();
     await page.waitForFunction(() =>
-      [...document.querySelectorAll('.folder-tile')][0]?.textContent?.includes('Articles'),
+      [...document.querySelectorAll('.folder-tile')][0]?.textContent?.includes('UI Folder Renamed'),
     );
     await page.unrouteAll({ behavior: 'wait' });
 
