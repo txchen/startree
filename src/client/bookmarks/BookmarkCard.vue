@@ -50,6 +50,12 @@ const activate = (event: MouseEvent) => {
           v-if="!faviconFailed"
           :src="`${destination.origin}/favicon.ico`"
           alt=""
+          width="18"
+          height="18"
+          loading="lazy"
+          decoding="async"
+          fetchpriority="low"
+          referrerpolicy="no-referrer"
           @error="faviconFailed = true"
         />
         <span v-else>{{ fallbackMark }}</span>
