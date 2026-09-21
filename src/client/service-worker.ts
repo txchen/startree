@@ -1,6 +1,6 @@
 /// <reference lib="webworker" />
 
-import { setCacheNameDetails } from 'workbox-core';
+import { clientsClaim, setCacheNameDetails } from 'workbox-core';
 import {
   cleanupOutdatedCaches,
   createHandlerBoundToURL,
@@ -16,13 +16,16 @@ import {
   shellCanActivate,
 } from './app/local-data';
 
+declare const self: ServiceWorkerGlobalScope;
+
 setCacheNameDetails({
   prefix: APPLICATION_CACHE_PREFIX,
   suffix: `shell-v${SHELL_COMPATIBILITY_VERSION}`,
 });
-// @ts-expect-error Workbox replaces this injected manifest token during the production build.
+// Workbox replaces this injected manifest token during the production build.
 precacheAndRoute(self.__WB_MANIFEST);
 cleanupOutdatedCaches();
+clientsClaim();
 registerRoute(
   new NavigationRoute(createHandlerBoundToURL('/index.html'), {
     denylist: APPLICATION_SHELL_NAVIGATION_DENYLIST,
@@ -38,6 +41,9 @@ globalThis.addEventListener('install', (event) => {
       if (!shellCanActivate(compatibility)) {
         throw new Error('The retained Bookmark snapshot is incompatible with this shell.');
       }
+      // Adopt compatible releases without waiting for every old tab to close.
+      // Existing documents keep their drafts; their next navigation uses this shell.
+      return self.skipWaiting();
     }),
   );
 });

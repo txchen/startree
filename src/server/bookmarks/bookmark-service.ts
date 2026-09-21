@@ -1616,6 +1616,7 @@ export const createBookmarkService = (
             title: bookmarkTitleFor(command.url, command.title),
             note: command.note,
             rank: await nextRank(database, 'bookmarks', 'folder_id', command.folderId),
+            pinRank: null,
             createdAt: timestamp,
             modifiedAt: timestamp,
             version: 1,

@@ -63,6 +63,7 @@ const snapshot = (revision = 1): BookmarkSnapshot => ({
     {
       id: '20000000-0000-4000-8000-000000000002',
       folderId,
+      pinRank: null,
       url: 'https://example.org/later',
       title: 'Later Bookmark',
       note: '',
@@ -74,6 +75,7 @@ const snapshot = (revision = 1): BookmarkSnapshot => ({
     {
       id: '20000000-0000-4000-8000-000000000001',
       folderId,
+      pinRank: null,
       url: 'https://example.com/now',
       title: 'Now Bookmark',
       note: 'Read this soon',
@@ -93,6 +95,35 @@ const snapshot = (revision = 1): BookmarkSnapshot => ({
 });
 
 describe('Bookmark state Module Interface', () => {
+  it('recovers pins stripped by an older tab even when its retained revision matches the server', async () => {
+    const retained = snapshot(7);
+    retained.bookmarks.forEach((bookmark) => {
+      delete bookmark.pinRank;
+    });
+    const authoritative = structuredClone(retained);
+    authoritative.bookmarks[0]!.pinRank = 'h';
+    authoritative.bookmarks[1]!.pinRank = null;
+    const remote = createMemoryBookmarkRemoteAdapter(authoritative);
+    const storage = createMemoryBookmarkStorageAdapter({ snapshot: retained });
+    const state = createBookmarkState({ remote, storage });
+    try {
+      await state.initialize({ folderId });
+      expect(
+        state.getState().bookmarks.find((bookmark) => bookmark.id === retained.bookmarks[0]!.id)
+          ?.pinRank,
+      ).toBe('h');
+      const stored = await storage.readSnapshot();
+      expect(stored).toMatchObject({
+        status: 'compatible',
+        snapshot: { revision: 7, bookmarks: authoritative.bookmarks },
+      });
+      await state.refresh();
+      expect(remote.requestedRevisions).toEqual([null, 7]);
+    } finally {
+      state.dispose();
+    }
+  });
+
   it('retains a selected Folder before publishing it as ready for an immediate reload', async () => {
     const storage = createMemoryBookmarkStorageAdapter();
     const state = createBookmarkState({

@@ -372,8 +372,13 @@ export const createBookmarkState = (adapters: {
       }, 5_000);
 
       try {
+        // Older tabs can retain the current revision while stripping newer fields.
+        // A matching revision alone cannot validate that incomplete local projection.
+        const hasCompletePinData = state.snapshot?.bookmarks.every(
+          (bookmark) => bookmark.pinRank !== undefined,
+        );
         const replacement = await adapters.remote.readSnapshot(
-          state.snapshot?.revision ?? null,
+          hasCompletePinData ? (state.snapshot?.revision ?? null) : null,
           controller.signal,
         );
         const synchronizedAt = new Date(lifecycle.now()).toISOString();

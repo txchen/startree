@@ -28,7 +28,7 @@ export const startPerformanceBrowserFixture = async (fixtureCase = 'hierarchy') 
       .all(),
     bookmarks: db
       .prepare(
-        'SELECT id,folder_id AS folderId,url,title,note,rank,created_at AS createdAt,modified_at AS modifiedAt,version FROM bookmarks',
+        'SELECT id,folder_id AS folderId,url,title,note,rank,pin_rank AS pinRank,created_at AS createdAt,modified_at AS modifiedAt,version FROM bookmarks',
       )
       .all(),
     tags: db

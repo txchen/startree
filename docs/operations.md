@@ -54,6 +54,8 @@ Both repeat the complete local verification, list that environment's pending rem
 
 Expand/contract is mandatory: first add nullable or independently usable schema, deploy code that tolerates both shapes, backfill separately when required, and remove the old shape only after the immediately previous Worker no longer depends on it. Never combine a destructive contract step with the release that first introduces its replacement. This keeps the previous Worker usable when migration succeeds but upload fails.
 
+Compatible service-worker releases activate without waiting for all existing tabs to close. Open documents retain their current UI and drafts; subsequent navigation uses the updated shell. Bookmark snapshots missing pin metadata are reloaded from the server even when their revision matches, because an older tab can strip fields from shared IndexedDB data. Local release verification includes an upgrade from an already installed cache-first shell with an older tab kept open.
+
 `deploy:production` targets `https://startree.txchen.win` and must never be run merely to test configuration. Use `wrangler deploy --dry-run --env production --profile txchendev` for a non-deploying configuration check. A failed upload leaves the prior deployment active; record the command output, inspect deployment status, and do not rerun migrations independently.
 
 ## Representative preview measurement

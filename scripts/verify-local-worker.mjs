@@ -17,6 +17,7 @@ import {
 } from './local-worker-acceptance.mjs';
 import { run } from './process.mjs';
 import { verifyPinnedBookmarks } from './pinned-bookmarks-acceptance.mjs';
+import { verifyShellUpgrade } from './verify-shell-upgrade.mjs';
 
 const scenarioPorts = new Map([
   ['management', process.env.STARTREE_VERIFY_MANAGEMENT_PORT ?? '8788'],
@@ -960,5 +961,6 @@ if (selectedScenario) {
         .join(', ')}`,
     );
   }
+  await verifyShellUpgrade();
   console.log('All local Worker verification scenarios passed.');
 }
