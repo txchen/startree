@@ -44,6 +44,7 @@ const activate = (event: MouseEvent) => {
     <a
       class="bookmark-card"
       :href="bookmark.url"
+      :data-open-bookmark-id="editable ? undefined : bookmark.id"
       :draggable="editable ? false : undefined"
       @click="activate"
     >

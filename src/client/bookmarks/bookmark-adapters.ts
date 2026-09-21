@@ -12,6 +12,11 @@ import {
   type BookmarkSnapshot,
   type BookmarkTrash,
 } from '../../shared/bookmarks/contracts';
+import {
+  normalizeRecentBookmarks,
+  RECENT_BOOKMARKS_SETTING,
+  type RecentBookmarkStorage,
+} from './recent-bookmarks';
 import { indexedDbRequest } from '../app/indexed-db';
 import { BOOKMARK_DATABASE_NAME } from '../app/local-data';
 import type {
@@ -154,6 +159,7 @@ export const createIndexedDbBookmarkAdapter = (
   databaseName = BOOKMARK_DATABASE_NAME,
   hooks: { beforeSnapshotCommit?(transaction: IDBTransaction): void } = {},
 ): BookmarkStorageAdapter &
+  RecentBookmarkStorage &
   Required<
     Pick<
       BookmarkStorageAdapter,
@@ -227,6 +233,30 @@ export const createIndexedDbBookmarkAdapter = (
   };
 
   return {
+    async readRecentBookmarks() {
+      return normalizeRecentBookmarks(await readSetting(RECENT_BOOKMARKS_SETTING));
+    },
+    async updateRecentBookmarks(id) {
+      const database = await databasePromise;
+      const transaction = database.transaction('settings', 'readwrite');
+      const complete = transactionComplete(transaction);
+      const settings = transaction.objectStore('settings');
+      const request = settings.get(RECENT_BOOKMARKS_SETTING);
+      let ids: string[] = [];
+      request.addEventListener(
+        'success',
+        () => {
+          ids =
+            id === null
+              ? []
+              : normalizeRecentBookmarks([id, ...normalizeRecentBookmarks(request.result?.value)]);
+          settings.put({ key: RECENT_BOOKMARKS_SETTING, value: ids });
+        },
+        { once: true },
+      );
+      await complete;
+      return ids;
+    },
     async readSnapshot() {
       const key = await readSetting('activeSnapshotKey');
       if (typeof key !== 'string') return { status: 'empty' };

@@ -10,6 +10,8 @@ import type {
 } from '../../shared/bookmarks/contracts';
 import BookmarkCard from './BookmarkCard.vue';
 import PinnedBookmarks from './PinnedBookmarks.vue';
+import RecentBookmarks from './RecentBookmarks.vue';
+import { createRecentBookmarks } from './recent-bookmarks';
 import BookmarkEditorModal from './BookmarkEditorModal.vue';
 import type { BookmarkEditorValue } from './bookmark-editor';
 import {
@@ -75,9 +77,10 @@ let moveReturnFocus: HTMLElement | null = null;
 const trashOpen = ref(false);
 const duplicatesOpen = ref(false);
 const undoableTrash = ref<{ root: BookmarkTrashRoot; version: number } | null>(null);
+const bookmarkStorage = createIndexedDbBookmarkAdapter();
 const stateModule = createBookmarkState({
   remote: createFetchBookmarkAdapter(),
-  storage: createIndexedDbBookmarkAdapter(),
+  storage: bookmarkStorage,
   search: createWorkerBookmarkSearchAdapter(),
   revisionChannel: createBroadcastBookmarkRevisionChannel(),
 });
@@ -154,6 +157,38 @@ const pinnedBookmarks = computed(() =>
           : left.id.localeCompare(right.id),
     ),
 );
+const recentHistory = createRecentBookmarks(bookmarkStorage);
+const recentIds = shallowRef<string[]>([]);
+const recentChannel = new BroadcastChannel('startree-recent-bookmarks');
+let recentDisposed = false;
+const recentBookmarks = computed(() => {
+  const bookmarks = new Map(state.value.bookmarks.map((bookmark) => [bookmark.id, bookmark]));
+  return recentIds.value.flatMap((id) => {
+    const bookmark = bookmarks.get(id);
+    return bookmark ? [bookmark] : [];
+  });
+});
+const recordOpening = async (id: string) => {
+  recentIds.value = await recentHistory.record(id);
+  if (!recentDisposed) recentChannel.postMessage('changed');
+};
+const recordLinkOpening = (event: MouseEvent) => {
+  if (event.defaultPrevented || (event.type === 'click' ? event.button !== 0 : event.button !== 1))
+    return;
+  const anchor =
+    event.target instanceof Element
+      ? event.target.closest<HTMLAnchorElement>('a[data-open-bookmark-id]')
+      : null;
+  if (anchor?.dataset.openBookmarkId) void recordOpening(anchor.dataset.openBookmarkId);
+};
+const clearRecent = async () => {
+  recentIds.value = await recentHistory.clear();
+  if (!recentDisposed) recentChannel.postMessage('changed');
+};
+const syncRecentHistory = async () => {
+  recentIds.value = await recentHistory.read();
+};
+
 const setBookmarkPin = async (bookmarkId: string, pinned: boolean, beforeBookmarkId?: string) => {
   if (!pinWritable.value || state.value.snapshotRevision === null) return;
   await stateModule.executeCommand({
@@ -281,6 +316,7 @@ const activateSearchResult = async (openInNewTab = false) => {
     return;
   }
   if (openInNewTab) {
+    void recordOpening(result.id);
     window.open(result.url, '_blank', 'noopener,noreferrer');
     return;
   }
@@ -811,6 +847,8 @@ const emptyTrash = async () => {
 };
 
 onMounted(async () => {
+  recentChannel.addEventListener('message', syncRecentHistory);
+  void syncRecentHistory();
   try {
     const storedSidebarWidth = Number(localStorage.getItem(SIDEBAR_WIDTH_STORAGE_KEY));
     if (Number.isFinite(storedSidebarWidth) && storedSidebarWidth > 0) {
@@ -846,6 +884,8 @@ watch(
 );
 
 onUnmounted(() => {
+  recentDisposed = true;
+  recentChannel.close();
   document.removeEventListener('keydown', handleGlobalKeydown);
   unsubscribe?.();
   stateModule.dispose();
@@ -854,7 +894,12 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <section class="bookmarks-page" :class="{ 'sidebar-resizing': resizingSidebar }">
+  <section
+    class="bookmarks-page"
+    :class="{ 'sidebar-resizing': resizingSidebar }"
+    @click="recordLinkOpening"
+    @auxclick="recordLinkOpening"
+  >
     <button ref="mobileFolderButton" class="mobile-folder-button" type="button" @click="openDrawer">
       <span aria-hidden="true">☰</span> Folders
     </button>
@@ -1081,6 +1126,7 @@ onUnmounted(() => {
                 v-else
                 :id="`search-result-${index}`"
                 :href="result.url"
+                :data-open-bookmark-id="result.id"
                 role="option"
                 :aria-selected="index === selectedSearchResult"
                 :class="{ selected: index === selectedSearchResult }"
@@ -1237,6 +1283,7 @@ onUnmounted(() => {
           :writable="pinWritable"
           @change="setBookmarkPin"
         />
+        <RecentBookmarks v-if="!searchOpen" :bookmarks="recentBookmarks" @clear="clearRecent" />
         <nav v-if="state.breadcrumbs.length > 1" class="breadcrumb" aria-label="Breadcrumb">
           <template v-for="(folder, index) in state.breadcrumbs" :key="folder.id">
             <span v-if="index" aria-hidden="true">/</span>

@@ -108,7 +108,7 @@ Read [docs/operations.md](docs/operations.md) before provisioning, deploying, me
 Startree is a single-Owner application. Cloudflare Access is the remote authentication boundary; the application does not implement public sign-up or multi-user tenancy.
 
 - D1 is the authoritative Bookmark store.
-- IndexedDB retains compatible snapshots, navigation, and unresolved operations in the browser.
+- IndexedDB retains compatible snapshots, navigation, unresolved operations, and the 10 most recently opened Bookmark IDs in the browser. Recent activity stays in this browser, works offline, and can be cleared from the Recently opened list.
 - Structured Bookmark data is not stored in Cache Storage, `localStorage`, or `sessionStorage`.
 - API responses are private and non-cacheable.
 - Logs and shared diagnostics must never contain Bookmark titles, URLs, Folder names, Tags, Notes, cookies, Access headers, or request bodies.

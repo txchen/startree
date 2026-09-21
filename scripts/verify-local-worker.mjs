@@ -16,6 +16,7 @@ import {
   verifyPageHistory,
 } from './local-worker-acceptance.mjs';
 import { run } from './process.mjs';
+import { verifyRecentBookmarks } from './recent-bookmarks-acceptance.mjs';
 import { verifyPinnedBookmarks } from './pinned-bookmarks-acceptance.mjs';
 import { verifyShellUpgrade } from './verify-shell-upgrade.mjs';
 
@@ -290,6 +291,7 @@ const verifyLocalWorker = async (scenario) => {
         await createAndVerifyHostileBookmark(page);
         await page.locator('.write-status.pending').waitFor({ state: 'detached' });
         await verifyPinnedBookmarks(page, browser);
+        await verifyRecentBookmarks(page);
 
         const bookmarkCards = page.locator('.bookmark-card-shell');
         const firstBookmarkId = await bookmarkCards.nth(0).getAttribute('data-bookmark-id');

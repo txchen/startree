@@ -6,7 +6,7 @@ GitHub Issues remain the implementation tracker. Use this document as the starti
 
 ## 1. Pinned Bookmarks
 
-**Status:** Implemented locally. Release verification is required before deployment.
+**Status:** Implemented, verified, and deployed.
 
 **Purpose:** Keep frequently used destinations immediately accessible across the Folder tree.
 
@@ -36,7 +36,7 @@ GitHub Issues remain the implementation tracker. Use this document as the starti
 
 ## 2. Recently Opened Bookmarks
 
-**Status:** Planned; not implemented.
+**Status:** Implemented and locally verified. Tracked in GitHub issue #22; deployment is recorded there.
 
 **Purpose:** Quickly return to destinations opened from Startree.
 
@@ -57,11 +57,14 @@ GitHub Issues remain the implementation tracker. Use this document as the starti
 - Changes to a Bookmark's title or URL are reflected in its recent entry.
 - Recording an opening does not delay navigation to the destination.
 
-### Decide during implementation
+### Implementation decisions
 
-- List length and placement, keeping the start page compact.
-- Whether recent activity is device-local or synchronized across the Owner's devices.
-- Handling offline openings and whether restored Bookmarks regain recent entries.
+- Keep at most 10 distinct Bookmark IDs in browser-local IndexedDB; never synchronize opening activity to the backend. The Owner selected this scope.
+- Show a compact list below Pinned while browsing Folders, with website icons, title initials as fallback, URL/Note hover text, and a clear action. Hide it in search, Trash, and duplicates.
+- Record primary, keyboard, modified, and middle-click openings from Bookmark cards, search, Pinned, and the recent list without intercepting native navigation. Browser context-menu openings cannot be observed reliably and are not recorded.
+- Retain offline openings and refresh persistence; use atomic IndexedDB transactions for updates and synchronize updates and clearing between tabs in the same browser. If browser storage is unavailable, retain a best-effort session list and allow navigation normally.
+- Resolve entries against the current active library so edits appear immediately and trashed or permanently deleted Bookmarks are hidden. Restoring a Bookmark reveals it again if its ID remains among the retained 10 entries.
+- Clearing the list removes only local activity, never Bookmarks or pins.
 
 ## 3. Encrypted Quick Notes
 

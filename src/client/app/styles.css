@@ -1445,11 +1445,11 @@ h2 {
   }
 }
 
-.pinned-bookmarks {
+.bookmark-shortcuts {
   margin-bottom: 24px;
 }
 
-.pinned-bookmarks > header {
+.bookmark-shortcuts > header {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -1457,14 +1457,14 @@ h2 {
   margin-bottom: 10px;
 }
 
-.pinned-bookmarks h2 {
+.bookmark-shortcuts h2 {
   margin: 0;
   color: #526359;
   font-size: 0.8rem;
   font-weight: 600;
 }
 
-.pinned-bookmarks button {
+.bookmark-shortcuts button {
   min-height: 28px;
   padding: 4px 8px;
   border: 1px solid #dce2dd;
@@ -1475,13 +1475,13 @@ h2 {
   font-size: 0.75rem;
 }
 
-.pinned-bookmarks button:disabled,
+.bookmark-shortcuts button:disabled,
 .bookmark-pin-button:disabled {
   cursor: default;
   opacity: 0.5;
 }
 
-.pinned-bookmarks ul {
+.bookmark-shortcuts ul {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
@@ -1490,7 +1490,7 @@ h2 {
   list-style: none;
 }
 
-.pinned-bookmarks li {
+.bookmark-shortcuts li {
   max-width: 100%;
   overflow: hidden;
   border: 1px solid #dce2dd;
@@ -1498,7 +1498,7 @@ h2 {
   background: #fff;
 }
 
-.pinned-bookmarks a {
+.bookmark-shortcuts a {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -1509,11 +1509,11 @@ h2 {
   text-decoration: none;
 }
 
-.pinned-bookmarks a:hover {
+.bookmark-shortcuts a:hover {
   background: #f1f5f2;
 }
 
-.pinned-bookmarks .bookmark-favicon {
+.bookmark-shortcuts .bookmark-favicon {
   width: 22px;
   height: 22px;
   flex-shrink: 0;
