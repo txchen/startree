@@ -1,10 +1,7 @@
 import MiniSearch, { type SearchResult } from 'minisearch';
 
-import {
-  SYSTEM_ROOT_FOLDER_ID,
-  type Bookmark,
-  type BookmarkSnapshot,
-} from '../../shared/bookmarks/contracts';
+import { SYSTEM_ROOT_FOLDER_ID } from '../../shared/bookmarks/constants';
+import type { Bookmark, BookmarkSnapshot } from '../../shared/bookmarks/contracts';
 import { bookmarkDomain } from './bookmark-library';
 
 export const BOOKMARK_SEARCH_RESULT_LIMIT = 20;

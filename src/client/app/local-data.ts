@@ -1,4 +1,4 @@
-import { BOOKMARK_SNAPSHOT_WIRE_FORMAT_VERSION } from '../../shared/bookmarks/contracts';
+import { BOOKMARK_SNAPSHOT_WIRE_FORMAT_VERSION } from '../../shared/bookmarks/constants';
 import { indexedDbRequest } from './indexed-db';
 
 export const APPLICATION_CACHE_PREFIX = 'startree';

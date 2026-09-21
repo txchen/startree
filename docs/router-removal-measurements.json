@@ -395,5 +395,36 @@
       ],
       "compression": "Node zlib defaults; complete files including sourceMappingURL comments"
     }
+  },
+  "appliedWorkerCleanup": {
+    "baselineCommit": "1cf53790ccc7a58addb04fc1fba9eac51381fed0",
+    "bundle": {
+      "assets": [
+        {
+          "file": "/assets/index-B0U6Cheo.js",
+          "bytes": 141781,
+          "gzipBytes": 46532,
+          "brotliBytes": 41787
+        },
+        {
+          "file": "/assets/bookmark-search-worker-Rre8xCHi.js",
+          "bytes": 21581,
+          "gzipBytes": 7089,
+          "brotliBytes": 6385
+        },
+        {
+          "file": "/service-worker.js",
+          "bytes": 18095,
+          "gzipBytes": 6097,
+          "brotliBytes": 5525
+        }
+      ],
+      "compression": "Node zlib defaults; complete files including sourceMappingURL comments"
+    },
+    "sourceMapChecks": {
+      "searchWorkerContainsValibot": false,
+      "serviceWorkerContainsValibot": false,
+      "applicationContainsValibot": true
+    }
   }
 }

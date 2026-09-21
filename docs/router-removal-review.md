@@ -53,18 +53,18 @@ There is no general-purpose UI component library, icon package, or date utility 
 | Hono                                                           | Server-side API routing                                                                 | Does not enter client bundles; removing it cannot reduce client download or browser memory.                                           |
 | Vite+, TypeScript, Vue tooling, Playwright, axe-core, Wrangler | Build, validation, test, and deployment tooling                                         | Not browser runtime libraries; deleting them would not directly shrink the client.                                                    |
 
-### Verified follow-up opportunity: separate constants from validation
+### Applied follow-up: separate constants from validation
 
-The search adapter only needs `SYSTEM_ROOT_FOLDER_ID` at runtime from the shared contracts file. The service worker's retained-snapshot compatibility code only needs `BOOKMARK_SNAPSHOT_WIRE_FORMAT_VERSION`. Importing those constants from the same module as top-level schema construction currently retains Valibot code in both Workers.
+The search adapter only needs `SYSTEM_ROOT_FOLDER_ID` at runtime from the shared contracts file. The service worker's retained-snapshot compatibility code only needs `BOOKMARK_SNAPSHOT_WIRE_FORMAT_VERSION`. Previously, importing those constants from the same module as top-level schema construction retained Valibot code in both Workers.
 
-A **temporary build only**, not applied to master, moved the three shared identifiers/version constants into a small separate module, re-exported them from the existing contracts module, and changed the two Worker-reachable imports to the constants module. Validation callers and schemas were unchanged.
+The follow-up now moves the three shared identifiers/version constants into `src/shared/bookmarks/constants.ts`, re-exports them from the existing contracts module, and changes the two Worker-reachable imports to the constants module. Validation callers, schemas, and backend behavior are unchanged. Production source maps confirm that neither browser Worker includes Valibot or the validation contracts module, while the application entry retains Valibot.
 
-| Worker         | Current gzip | Temporary constants-only import gzip |  Saving |
-| -------------- | -----------: | -----------------------------------: | ------: |
-| Search Worker  |      9.22 KB |                              7.09 KB | 2.13 KB |
-| Service worker |      8.27 KB |                              6.10 KB | 2.18 KB |
+| Worker         | Before gzip | After gzip |  Saving |
+| -------------- | ----------: | ---------: | ------: |
+| Search Worker  |     9.22 KB |    7.09 KB | 2.13 KB |
+| Service worker |     8.27 KB |    6.10 KB | 2.18 KB |
 
-The combined saving is approximately **4.31 KB gzip**, with almost no change to the application entry. This is a better next candidate than replacing the search engine or rewriting the offline cache layer. It removes unnecessary Worker imports rather than deleting validation. It still needs its own regression verification before being shipped.
+The combined saving is approximately **4.31 KB gzip**, with almost no change to the application entry. The change removes unnecessary Worker imports while preserving validation. The preceding Router measurements and the temporary probe remain in the raw results as historical baselines; `appliedWorkerCleanup` records the actual follow-up build.
 
 ## Validation and reproduction
 
