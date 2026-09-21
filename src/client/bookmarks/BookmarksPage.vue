@@ -1277,13 +1277,17 @@ onUnmounted(() => {
       </div>
 
       <template v-else>
-        <PinnedBookmarks
-          v-if="!searchOpen"
-          :bookmarks="pinnedBookmarks"
-          :writable="pinWritable"
-          @change="setBookmarkPin"
-        />
-        <RecentBookmarks v-if="!searchOpen" :bookmarks="recentBookmarks" @clear="clearRecent" />
+        <div
+          v-if="!searchOpen && (pinnedBookmarks.length || recentBookmarks.length)"
+          class="bookmark-shortcut-bar"
+        >
+          <PinnedBookmarks
+            :bookmarks="pinnedBookmarks"
+            :writable="pinWritable"
+            @change="setBookmarkPin"
+          />
+          <RecentBookmarks :bookmarks="recentBookmarks" @clear="clearRecent" />
+        </div>
         <nav v-if="state.breadcrumbs.length > 1" class="breadcrumb" aria-label="Breadcrumb">
           <template v-for="(folder, index) in state.breadcrumbs" :key="folder.id">
             <span v-if="index" aria-hidden="true">/</span>

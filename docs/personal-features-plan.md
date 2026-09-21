@@ -29,7 +29,7 @@ GitHub Issues remain the implementation tracker. Use this document as the starti
 
 ### Implementation decisions
 
-- Show a compact, wrapping pinned area below search while browsing Folders on desktop and mobile. Hide it while searching or reviewing Trash and duplicates.
+- Show a compact, single-row pinned area below search while browsing Folders on desktop and mobile, with horizontal scrolling for overflow. Hide it while searching or reviewing Trash and duplicates.
 - Pin and unpin using the star on a Bookmark card in browsing mode. Arrange pins with earlier/later buttons that support keyboard and touch input.
 - Trashing a Bookmark or its Folder hides the pin; restoring it restores the pin. Permanent deletion removes it.
 - Pin changes require an online connection and use revision checks to reject stale ordering changes. Retained snapshots include pins for offline browsing.
@@ -60,7 +60,7 @@ GitHub Issues remain the implementation tracker. Use this document as the starti
 ### Implementation decisions
 
 - Keep at most 10 distinct Bookmark IDs in browser-local IndexedDB; never synchronize opening activity to the backend. The Owner selected this scope.
-- Show a compact list below Pinned while browsing Folders, with website icons, title initials as fallback, URL/Note hover text, and a clear action. Hide it in search, Trash, and duplicates.
+- Show an initially collapsed Recently opened disclosure alongside Pinned (below it on narrow screens), opening an overlay list while browsing Folders, with website icons, title initials as fallback, URL/Note hover text, and a clear action. Hide it in search, Trash, and duplicates.
 - Record primary, keyboard, modified, and middle-click openings from Bookmark cards, search, Pinned, and the recent list without intercepting native navigation. Browser context-menu openings cannot be observed reliably and are not recorded.
 - Retain offline openings and refresh persistence; use atomic IndexedDB transactions for updates and synchronize updates and clearing between tabs in the same browser. If browser storage is unavailable, retain a best-effort session list and allow navigation normally.
 - Resolve entries against the current active library so edits appear immediately and trashed or permanently deleted Bookmarks are hidden. Restoring a Bookmark reveals it again if its ID remains among the retained 10 entries.

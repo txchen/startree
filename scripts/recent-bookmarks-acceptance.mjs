@@ -8,14 +8,21 @@ export const verifyRecentBookmarks = async (page) => {
   const cards = page.locator('.bookmark-card-shell');
   const first = await cards.nth(0).getAttribute('data-bookmark-id');
   const second = await cards.nth(1).getAttribute('data-bookmark-id');
-  const waitForOrder = (target, ids) =>
-    target.waitForFunction(
+  const waitForOrder = async (target, ids) => {
+    await target.waitForFunction(
       (expected) =>
         JSON.stringify(
           [...document.querySelectorAll('[data-recent-id]')].map((item) => item.dataset.recentId),
         ) === JSON.stringify(expected),
       ids,
     );
+    if (ids.length) {
+      const disclosure = target.locator('.recent-disclosure');
+      if (!(await disclosure.evaluate((element) => element.open))) {
+        await disclosure.locator('summary').click();
+      }
+    }
+  };
   const external = (url) => url.origin !== base;
   const serveDestination = (route) =>
     route.fulfill({ contentType: 'text/html', body: '<title>Destination</title>' });
@@ -50,6 +57,19 @@ export const verifyRecentBookmarks = async (page) => {
     await page.locator(`[data-pin-id="${second}"]`).waitFor();
     await openInNewTab(page.locator(`[data-pin-id="${second}"] a`));
     await waitForOrder(page, [second, first]);
+    const firstCardTop = (await cards.first().boundingBox()).y;
+    await page.locator('.recent-disclosure summary').click();
+    assert.equal((await cards.first().boundingBox()).y, firstCardTop);
+    assert.ok((await page.locator('.bookmark-shortcut-bar').boundingBox()).height < 70);
+    if (process.env.STARTREE_CAPTURE_SHORTCUTS) {
+      await page.screenshot({ path: '/tmp/startree-shortcuts-desktop.png', fullPage: true });
+    }
+    await page.locator('.recent-disclosure summary').click();
+    await page.locator('.recent-disclosure summary').press('Escape');
+    assert.equal(
+      await page.locator('.recent-disclosure').evaluate((element) => element.open),
+      false,
+    );
     await cards.nth(1).locator('.bookmark-pin-button').click();
     await page.locator(`[data-pin-id="${second}"]`).waitFor({ state: 'detached' });
     await assertAccessible(page, 'recently opened Bookmarks');
@@ -59,10 +79,15 @@ export const verifyRecentBookmarks = async (page) => {
     await other.goto(base);
     await waitForOrder(other, [second, first]);
     await assertAccessible(other, 'mobile recent Bookmarks');
+    if (process.env.STARTREE_CAPTURE_SHORTCUTS) {
+      await other.screenshot({ path: '/tmp/startree-shortcuts-mobile.png', fullPage: true });
+    }
     assert.equal(
       await other.evaluate(() => document.documentElement.scrollWidth > innerWidth),
       false,
     );
+    if (!(await page.locator('.recent-disclosure').evaluate((element) => element.open)))
+      await page.locator('.recent-disclosure summary').click();
     await page.getByRole('button', { name: 'Clear recent', exact: true }).click();
     await waitForOrder(other, []);
     await page.evaluate(async () => {
@@ -82,6 +107,8 @@ export const verifyRecentBookmarks = async (page) => {
     await page.reload();
     await waitForOrder(page, [first]);
     await context.setOffline(false);
+    if (!(await page.locator('.recent-disclosure').evaluate((element) => element.open)))
+      await page.locator('.recent-disclosure summary').click();
     await page.getByRole('button', { name: 'Clear recent', exact: true }).click();
     await waitForOrder(page, []);
     await page.reload();

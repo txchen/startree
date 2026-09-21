@@ -625,7 +625,7 @@ h2 {
   display: flex;
   align-items: center;
   gap: 7px;
-  margin-bottom: 14px;
+  margin-bottom: 8px;
   color: #6b6f74;
   font-size: 0.75rem;
 }
@@ -644,7 +644,7 @@ h2 {
   align-items: end;
   justify-content: space-between;
   gap: 18px;
-  padding-bottom: 18px;
+  padding-bottom: 12px;
   border-bottom: 1px solid #e1e3e6;
 }
 
@@ -1555,4 +1555,125 @@ h2 {
 .bookmark-pin-button[aria-pressed='true'] {
   color: #365943;
   background: #edf3ee;
+}
+
+/* Keep navigation shortcuts bounded so the library remains the primary content. */
+.bookmark-shortcut-bar {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 18px;
+  min-width: 0;
+}
+
+.bookmark-shortcut-bar .pinned-bookmarks {
+  display: flex;
+  align-items: center;
+  flex: 1;
+  min-width: 0;
+  gap: 10px;
+  margin: 0;
+}
+
+.pinned-bookmarks > header {
+  display: contents;
+}
+
+.pinned-bookmarks > header h2 {
+  flex-shrink: 0;
+}
+
+.pinned-bookmarks > header button {
+  order: 2;
+  flex-shrink: 0;
+}
+
+.pinned-bookmarks ul {
+  flex: 1;
+  flex-wrap: nowrap;
+  min-width: 0;
+  overflow-x: auto;
+  padding: 2px 0;
+}
+
+.pinned-bookmarks li {
+  flex-shrink: 0;
+}
+
+.pinned-bookmarks a {
+  padding: 6px 9px;
+  max-width: 180px;
+}
+
+.recent-disclosure {
+  position: relative;
+  flex-shrink: 0;
+  margin-left: auto;
+}
+
+.recent-disclosure > summary {
+  padding: 7px 0;
+  color: #526359;
+  cursor: pointer;
+  font-size: 0.8rem;
+}
+
+.recent-disclosure > summary span {
+  margin-left: 4px;
+  color: #6b6f74;
+  font-size: 0.72rem;
+}
+
+.recent-disclosure .recent-bookmarks {
+  position: absolute;
+  z-index: 5;
+  top: calc(100% + 6px);
+  right: 0;
+  width: min(360px, calc(100vw - 40px));
+  max-height: 320px;
+  overflow-y: auto;
+  margin: 0;
+  padding: 14px;
+  border: 1px solid #dce2dd;
+  border-radius: 10px;
+  background: #fff;
+  box-shadow: 0 8px 28px #24382b1a;
+}
+
+.recent-bookmarks ul {
+  display: grid;
+  gap: 4px;
+}
+
+.recent-bookmarks li {
+  border: 0;
+}
+
+.recent-bookmarks a {
+  max-width: none;
+  padding: 7px 8px;
+}
+
+@media (min-width: 761px) {
+  .library-actions {
+    flex-direction: row;
+    align-items: center;
+    gap: 14px;
+  }
+}
+
+@media (max-width: 760px) {
+  .bookmark-shortcut-bar {
+    flex-wrap: wrap;
+    gap: 4px;
+    margin-bottom: 12px;
+  }
+
+  .bookmark-shortcut-bar .pinned-bookmarks {
+    flex-basis: 100%;
+  }
+
+  .pinned-bookmarks a {
+    max-width: 150px;
+  }
 }
