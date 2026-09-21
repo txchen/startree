@@ -47,7 +47,7 @@ const activate = (event: MouseEvent) => {
       :draggable="editable ? false : undefined"
       @click="activate"
     >
-      <BookmarkFavicon :url="bookmark.url" />
+      <BookmarkFavicon :url="bookmark.url" :title="bookmark.title" />
       <span class="bookmark-copy">
         <strong>{{ bookmark.title }}</strong>
         <span class="bookmark-host">{{ destination.hostname }}</span>

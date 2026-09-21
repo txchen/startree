@@ -30,7 +30,7 @@ const managing = ref(false);
     <ul id="pinned-list">
       <li v-for="(bookmark, index) in bookmarks" :key="bookmark.id" :data-pin-id="bookmark.id">
         <a :href="bookmark.url" :title="[bookmark.url, bookmark.note].filter(Boolean).join('\n')">
-          <BookmarkFavicon :url="bookmark.url" />
+          <BookmarkFavicon :url="bookmark.url" :title="bookmark.title" />
           <span class="pinned-title">{{ bookmark.title }}</span>
         </a>
         <div v-if="managing" class="pin-actions">

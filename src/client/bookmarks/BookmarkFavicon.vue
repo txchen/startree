@@ -1,9 +1,9 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue';
 
-const props = defineProps<{ url: string }>();
+const props = defineProps<{ url: string; title: string }>();
 const origin = computed(() => new URL(props.url).origin);
-const fallbackMark = computed(() => new URL(props.url).hostname.charAt(0).toUpperCase() || '↗');
+const fallbackMark = computed(() => Array.from(props.title.trim())[0]?.toUpperCase() || '↗');
 const failed = ref(false);
 watch(origin, () => {
   failed.value = false;
