@@ -179,6 +179,48 @@ describe('Bookmark search Adapter Interface', () => {
     expect(search.revision()).toBe(2);
   });
 
+  it('applies filters before limiting a large result set and clears filter data on replacement', async () => {
+    const search = createMiniSearchBookmarkAdapter();
+    const source = snapshot();
+    const bookmarks = Array.from({ length: 60 }, (_, index) => ({
+      ...source.bookmarks[0]!,
+      id: `20000000-0000-4000-8000-${String(index + 100).padStart(12, '0')}`,
+      title: `Shared result ${index}`,
+    }));
+    const tags = bookmarks
+      .slice(30)
+      .map((bookmark) => ({ bookmarkId: bookmark.id, value: 'Late' }));
+    await search.replace({ ...source, bookmarks, tags });
+    for (const query of ['', 'Shared']) {
+      const results = await search.search(query, { tags: ['Late'], domains: [] }, folderId);
+      expect(results).toHaveLength(BOOKMARK_SEARCH_RESULT_LIMIT);
+      expect(
+        results.every((result) => result.kind === 'bookmark' && result.tags.includes('Late')),
+      ).toBe(true);
+    }
+    await search.replace({ ...snapshot(2), bookmarks: [], tags: [] });
+    await expect(search.search('', { tags: ['Late'], domains: [] })).resolves.toEqual([]);
+    search.dispose();
+    await expect(search.search('Research')).resolves.toEqual([]);
+  });
+
+  it('keeps sibling Bookmarks in scope without including the selected Folder itself', async () => {
+    const search = createMiniSearchBookmarkAdapter();
+    const source = snapshot();
+    await search.replace({
+      ...source,
+      bookmarks: [
+        ...source.bookmarks,
+        { ...source.bookmarks[0]!, id: '20000000-0000-4000-8000-000000000003' },
+      ],
+    });
+    await expect(search.search('Needle', undefined, childFolderId)).resolves.toHaveLength(2);
+    await expect(search.search('Browsers', undefined, childFolderId)).resolves.toEqual([]);
+    await expect(search.search('Needle', undefined, SYSTEM_ROOT_FOLDER_ID)).resolves.toHaveLength(
+      3,
+    );
+  });
+
   it('excludes records that are not reachable from the active Folder tree', async () => {
     const search = createMiniSearchBookmarkAdapter();
     const unreachableFolderId = '90000000-0000-4000-8000-000000000001';

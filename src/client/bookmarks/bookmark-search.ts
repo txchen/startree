@@ -61,28 +61,32 @@ export type BookmarkSearchAdapter = {
 };
 
 type SearchDocument = BookmarkSearchResult & {
-  documentId: string;
-  urlText: string;
-  tagText: string;
-  noteText: string;
-  scopeFolderIds: string[];
+  // Position in the payload array, rebuilt with each snapshot.
+  documentId: number;
+  scopeFolderIds: readonly string[];
 };
 
 const createIndex = () =>
   new MiniSearch<SearchDocument>({
+    // Keep result payloads in one array instead of duplicating them in storeFields.
     idField: 'documentId',
     fields: ['title', 'urlText', 'tagText', 'noteText'],
-    storeFields: [
-      'kind',
-      'id',
-      'title',
-      'folderId',
-      'folderPath',
-      'url',
-      'note',
-      'tags',
-      'scopeFolderIds',
-    ],
+    extractField(document, field) {
+      switch (field) {
+        case 'documentId':
+          return document.documentId;
+        case 'title':
+          return document.title;
+        case 'urlText':
+          return document.kind === 'bookmark' ? document.url : '';
+        case 'tagText':
+          return document.kind === 'bookmark' ? document.tags.join(' ') : '';
+        case 'noteText':
+          return document.kind === 'bookmark' ? document.note : '';
+        default:
+          return undefined;
+      }
+    },
     searchOptions: {
       boost: { title: 12, tagText: 5, urlText: 3, noteText: 1 },
       prefix: true,
@@ -91,7 +95,8 @@ const createIndex = () =>
 
 type ActiveFolderDetails = Readonly<{
   path: string;
-  scopeFolderIds: string[];
+  scopeFolderIds: readonly string[];
+  bookmarkScopeFolderIds: readonly string[];
 }>;
 
 const activeFolderDetails = (snapshot: BookmarkSnapshot): Map<string, ActiveFolderDetails> => {
@@ -103,7 +108,10 @@ const activeFolderDetails = (snapshot: BookmarkSnapshot): Map<string, ActiveFold
   }
 
   const details = new Map<string, ActiveFolderDetails>([
-    [SYSTEM_ROOT_FOLDER_ID, { path: 'Bookmarks', scopeFolderIds: [] }],
+    [
+      SYSTEM_ROOT_FOLDER_ID,
+      { path: 'Bookmarks', scopeFolderIds: [], bookmarkScopeFolderIds: [SYSTEM_ROOT_FOLDER_ID] },
+    ],
   ]);
   const pending = [SYSTEM_ROOT_FOLDER_ID];
   while (pending.length) {
@@ -115,7 +123,8 @@ const activeFolderDetails = (snapshot: BookmarkSnapshot): Map<string, ActiveFold
       if (details.has(child.id)) continue;
       details.set(child.id, {
         path: `${parentDetails.path} / ${child.name}`,
-        scopeFolderIds: [...parentDetails.scopeFolderIds, parentId],
+        scopeFolderIds: parentDetails.bookmarkScopeFolderIds,
+        bookmarkScopeFolderIds: [...parentDetails.bookmarkScopeFolderIds, child.id],
       });
       pending.push(child.id);
     }
@@ -138,14 +147,11 @@ const documentsFor = (snapshot: BookmarkSnapshot): SearchDocument[] => {
     if (!details || folder.id === SYSTEM_ROOT_FOLDER_ID) continue;
     documents.push({
       kind: 'folder',
-      documentId: `folder:${folder.id}`,
+      documentId: documents.length,
       id: folder.id,
       title: folder.name,
       folderId: folder.id,
       folderPath: details.path,
-      urlText: '',
-      tagText: '',
-      noteText: '',
       scopeFolderIds: details.scopeFolderIds,
     });
   }
@@ -155,23 +161,27 @@ const documentsFor = (snapshot: BookmarkSnapshot): SearchDocument[] => {
     if (!details) continue;
     const tags = tagsByBookmark.get(bookmark.id) ?? [];
     documents.push(
-      bookmarkDocument(bookmark, details.path, tags, [
-        ...details.scopeFolderIds,
-        bookmark.folderId,
-      ]),
+      bookmarkDocument(
+        documents.length,
+        bookmark,
+        details.path,
+        tags,
+        details.bookmarkScopeFolderIds,
+      ),
     );
   }
   return documents;
 };
 
 const bookmarkDocument = (
+  documentId: number,
   bookmark: Bookmark,
   folderPath: string,
   tags: string[],
-  scopeFolderIds: string[],
+  scopeFolderIds: readonly string[],
 ): SearchDocument => ({
   kind: 'bookmark',
-  documentId: `bookmark:${bookmark.id}`,
+  documentId,
   id: bookmark.id,
   title: bookmark.title,
   folderId: bookmark.folderId,
@@ -179,9 +189,6 @@ const bookmarkDocument = (
   url: bookmark.url,
   note: bookmark.note,
   tags,
-  urlText: bookmark.url,
-  tagText: tags.join(' '),
-  noteText: bookmark.note,
   scopeFolderIds,
 });
 
@@ -198,19 +205,23 @@ const noteExcerpt = (note: string, terms: readonly string[]): string => {
   return `${start > 0 ? '…' : ''}${compact.slice(start, end)}${end < compact.length ? '…' : ''}`;
 };
 
-const contextFor = (result: SearchResult): BookmarkSearchContext | undefined => {
+const contextFor = (
+  document: SearchDocument,
+  result: SearchResult,
+): BookmarkSearchContext | undefined => {
+  if (document.kind !== 'bookmark') return undefined;
   const fields = new Set(Object.values(result.match).flat());
   if (fields.has('title')) return undefined;
   const terms = result.terms.map((term) => term.toLocaleLowerCase());
   if (fields.has('tagText')) {
-    const tags = Array.isArray(result.tags) ? result.tags.map(String) : [];
+    const tags = document.tags;
     const tag = tags.find((value) =>
       terms.some((term) => value.toLocaleLowerCase().includes(term)),
     );
     return { label: 'Tag', text: tag ?? tags[0] ?? '' };
   }
   if (fields.has('urlText')) {
-    const url = String(result.url);
+    const url = document.url;
     try {
       return { label: 'URL', text: new URL(url).hostname };
     } catch {
@@ -218,36 +229,15 @@ const contextFor = (result: SearchResult): BookmarkSearchContext | undefined => 
     }
   }
   if (fields.has('noteText')) {
-    return { label: 'Note', text: noteExcerpt(String(result.note), result.terms) };
+    return { label: 'Note', text: noteExcerpt(document.note, result.terms) };
   }
   return undefined;
 };
 
-const resultFrom = (result: SearchResult): BookmarkSearchResult => {
-  if (result.kind === 'folder') {
-    return {
-      kind: 'folder',
-      id: String(result.id),
-      title: String(result.title),
-      folderId: String(result.folderId),
-      folderPath: String(result.folderPath),
-    };
-  }
-  const context = contextFor(result);
-  return {
-    kind: 'bookmark',
-    id: String(result.id),
-    title: String(result.title),
-    folderId: String(result.folderId),
-    folderPath: String(result.folderPath),
-    url: String(result.url),
-    note: String(result.note),
-    tags: Array.isArray(result.tags) ? result.tags.map(String) : [],
-    ...(context ? { context } : {}),
-  };
-};
-
-const resultFromDocument = (document: SearchDocument): BookmarkSearchResult => {
+const resultFromDocument = (
+  document: SearchDocument,
+  match?: SearchResult,
+): BookmarkSearchResult => {
   if (document.kind === 'folder') {
     return {
       kind: 'folder',
@@ -257,6 +247,7 @@ const resultFromDocument = (document: SearchDocument): BookmarkSearchResult => {
       folderPath: document.folderPath,
     };
   }
+  const context = match ? contextFor(document, match) : undefined;
   return {
     kind: 'bookmark',
     id: document.id,
@@ -265,7 +256,8 @@ const resultFromDocument = (document: SearchDocument): BookmarkSearchResult => {
     folderPath: document.folderPath,
     url: document.url,
     note: document.note,
-    tags: document.tags,
+    tags: [...document.tags],
+    ...(context ? { context } : {}),
   };
 };
 
@@ -301,39 +293,31 @@ export const createMiniSearchBookmarkAdapter = (): BookmarkSearchAdapter => {
     async replace(snapshot) {
       if (snapshot.revision === indexedRevision) return;
       const replacement = createIndex();
-      documents = documentsFor(snapshot);
-      replacement.addAll(documents);
+      const replacements = documentsFor(snapshot);
+      replacement.addAll(replacements);
       index = replacement;
+      documents = replacements;
       indexedRevision = snapshot.revision;
     },
     async search(query, filters = EMPTY_BOOKMARK_SEARCH_FILTERS, scopeFolderId = null) {
       const normalized = query.trim();
+      const results: BookmarkSearchResult[] = [];
       if (!normalized) {
-        return bookmarkSearchFiltersActive(filters)
-          ? documents
-              .filter((document) => matchesFilters(document, filters, scopeFolderId))
-              .slice(0, BOOKMARK_SEARCH_RESULT_LIMIT)
-              .map(resultFromDocument)
-          : [];
+        if (!bookmarkSearchFiltersActive(filters)) return results;
+        for (const document of documents) {
+          if (!matchesFilters(document, filters, scopeFolderId)) continue;
+          results.push(resultFromDocument(document));
+          if (results.length === BOOKMARK_SEARCH_RESULT_LIMIT) break;
+        }
+        return results;
       }
-      return index
-        .search(normalized)
-        .filter((result) =>
-          matchesFilters(
-            {
-              kind: String(result.kind) as SearchDocument['kind'],
-              url: String(result.url ?? ''),
-              tags: Array.isArray(result.tags) ? result.tags.map(String) : [],
-              scopeFolderIds: Array.isArray(result.scopeFolderIds)
-                ? result.scopeFolderIds.map(String)
-                : [],
-            },
-            filters,
-            scopeFolderId,
-          ),
-        )
-        .slice(0, BOOKMARK_SEARCH_RESULT_LIMIT)
-        .map((result) => resultFrom(result));
+      for (const match of index.search(normalized)) {
+        const document = documents[Number(match.id)];
+        if (!document || !matchesFilters(document, filters, scopeFolderId)) continue;
+        results.push(resultFromDocument(document, match));
+        if (results.length === BOOKMARK_SEARCH_RESULT_LIMIT) break;
+      }
+      return results;
     },
     revision: () => indexedRevision,
     dispose() {
