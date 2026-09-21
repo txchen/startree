@@ -8,6 +8,8 @@ const query = ref('');
 const selectedId = ref('');
 const mobileEditor = ref(false);
 const password = ref('');
+// Secret fields use the one-time-code hint to suppress Chromium login heuristics.
+// This is a password-manager workaround, not a change to the reusable vault password.
 const secretInput = ref<HTMLInputElement>();
 watch(secretInput, (input) => input?.focus({ preventScroll: true }), { flush: 'post' });
 const confirmation = ref('');
@@ -366,7 +368,7 @@ onUnmounted(() => {
             ref="secretInput"
             v-model="password"
             type="password"
-            autocomplete="off"
+            autocomplete="one-time-code"
             required /></label
         ><button class="notes-primary" :disabled="formBusy">Resume unsaved notes</button>
       </form>
@@ -428,7 +430,7 @@ onUnmounted(() => {
               type="password"
               minlength="12"
               maxlength="1024"
-              autocomplete="off"
+              autocomplete="one-time-code"
               required
           /></label>
           <label
@@ -437,7 +439,7 @@ onUnmounted(() => {
               type="password"
               minlength="12"
               maxlength="1024"
-              autocomplete="off"
+              autocomplete="one-time-code"
               required
           /></label>
           <button class="notes-primary" :disabled="formBusy">
@@ -491,7 +493,7 @@ onUnmounted(() => {
               ref="secretInput"
               v-model="password"
               type="password"
-              autocomplete="off"
+              autocomplete="one-time-code"
               maxlength="1024"
               required
           /></label>
