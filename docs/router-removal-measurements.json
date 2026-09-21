@@ -1,0 +1,399 @@
+{
+  "baselineCommit": "bed022ca6600540f5c5672bb3c794049abb7d60a",
+  "vueVersion": "3.5.41",
+  "date": "2026-09-21",
+  "variants": {
+    "baseline": {
+      "bundle": {
+        "assets": [
+          {
+            "file": "/assets/index-BJwAQXWO.js",
+            "bytes": 166270,
+            "gzipBytes": 55356,
+            "brotliBytes": 49655
+          },
+          {
+            "file": "/assets/bookmark-search-worker-BtK2WTE0.js",
+            "bytes": 29028,
+            "gzipBytes": 9223,
+            "brotliBytes": 8322
+          },
+          {
+            "file": "/service-worker.js",
+            "bytes": 25685,
+            "gzipBytes": 8275,
+            "brotliBytes": 7524
+          }
+        ],
+        "compression": "Node zlib defaults; complete files including sourceMappingURL comments"
+      },
+      "render": {
+        "fixture": {
+          "case": "hierarchy",
+          "bookmarks": 10000,
+          "folders": 1000,
+          "maximumDepth": 10,
+          "maximumFieldSamples": false
+        },
+        "browserVersion": "151.0.7922.34",
+        "runs": 5,
+        "summary": {
+          "coldBrowseMs": 444,
+          "warmBrowseMs": 248,
+          "folderPaintMs": 64.20000004768372,
+          "renderedCards": 10
+        },
+        "samples": [
+          {
+            "coldBrowseMs": 498.5,
+            "warmBrowseMs": 262.2999999523163,
+            "folderPaintMs": 67.5,
+            "renderedCards": 10
+          },
+          {
+            "coldBrowseMs": 451.7999999523163,
+            "warmBrowseMs": 246.89999985694885,
+            "folderPaintMs": 51.89999985694885,
+            "renderedCards": 10
+          },
+          {
+            "coldBrowseMs": 444,
+            "warmBrowseMs": 247.79999995231628,
+            "folderPaintMs": 64.20000004768372,
+            "renderedCards": 10
+          },
+          {
+            "coldBrowseMs": 436.7000000476837,
+            "warmBrowseMs": 248,
+            "folderPaintMs": 63.299999952316284,
+            "renderedCards": 10
+          },
+          {
+            "coldBrowseMs": 438.59999990463257,
+            "warmBrowseMs": 261.2999999523163,
+            "folderPaintMs": 65.29999995231628,
+            "renderedCards": 10
+          }
+        ]
+      },
+      "memory": {
+        "fixture": {
+          "case": "hierarchy",
+          "bookmarks": 10000,
+          "folders": 1000,
+          "maximumDepth": 10,
+          "maximumFieldSamples": false
+        },
+        "browserVersion": "151.0.7922.34",
+        "nodeVersion": "v24.13.0",
+        "runs": 3,
+        "summary": [
+          {
+            "phase": "root",
+            "mainHeapBytes": 6310352,
+            "searchHeapBytes": 11872788,
+            "totalHeapBytes": 18183140,
+            "domNodes": 191
+          },
+          {
+            "phase": "folder",
+            "mainHeapBytes": 6775128,
+            "searchHeapBytes": 11872788,
+            "totalHeapBytes": 18648068,
+            "domNodes": 1650
+          },
+          {
+            "phase": "returned",
+            "mainHeapBytes": 6674336,
+            "searchHeapBytes": 11872788,
+            "totalHeapBytes": 18547124,
+            "domNodes": 192
+          }
+        ],
+        "samples": [
+          {
+            "run": 0,
+            "phase": "root",
+            "mainHeapBytes": 6310176,
+            "searchHeapBytes": 11875944,
+            "totalHeapBytes": 18186120,
+            "domNodes": 191
+          },
+          {
+            "run": 0,
+            "phase": "folder",
+            "mainHeapBytes": 6775116,
+            "searchHeapBytes": 11875944,
+            "totalHeapBytes": 18651060,
+            "domNodes": 1650
+          },
+          {
+            "run": 0,
+            "phase": "returned",
+            "mainHeapBytes": 6674160,
+            "searchHeapBytes": 11875944,
+            "totalHeapBytes": 18550104,
+            "domNodes": 192
+          },
+          {
+            "run": 1,
+            "phase": "root",
+            "mainHeapBytes": 6310352,
+            "searchHeapBytes": 11872788,
+            "totalHeapBytes": 18183140,
+            "domNodes": 191
+          },
+          {
+            "run": 1,
+            "phase": "folder",
+            "mainHeapBytes": 6775128,
+            "searchHeapBytes": 11872788,
+            "totalHeapBytes": 18647916,
+            "domNodes": 1644
+          },
+          {
+            "run": 1,
+            "phase": "returned",
+            "mainHeapBytes": 6674336,
+            "searchHeapBytes": 11872788,
+            "totalHeapBytes": 18547124,
+            "domNodes": 192
+          },
+          {
+            "run": 2,
+            "phase": "root",
+            "mainHeapBytes": 6310512,
+            "searchHeapBytes": 11872292,
+            "totalHeapBytes": 18182804,
+            "domNodes": 191
+          },
+          {
+            "run": 2,
+            "phase": "folder",
+            "mainHeapBytes": 6775776,
+            "searchHeapBytes": 11872292,
+            "totalHeapBytes": 18648068,
+            "domNodes": 1650
+          },
+          {
+            "run": 2,
+            "phase": "returned",
+            "mainHeapBytes": 6674496,
+            "searchHeapBytes": 11872292,
+            "totalHeapBytes": 18546788,
+            "domNodes": 192
+          }
+        ]
+      }
+    },
+    "without-router": {
+      "bundle": {
+        "assets": [
+          {
+            "file": "/assets/index-C62c1r0G.js",
+            "bytes": 141781,
+            "gzipBytes": 46533,
+            "brotliBytes": 41807
+          },
+          {
+            "file": "/assets/bookmark-search-worker-BtK2WTE0.js",
+            "bytes": 29028,
+            "gzipBytes": 9223,
+            "brotliBytes": 8322
+          },
+          {
+            "file": "/service-worker.js",
+            "bytes": 25685,
+            "gzipBytes": 8274,
+            "brotliBytes": 7524
+          }
+        ],
+        "compression": "Node zlib defaults; complete files including sourceMappingURL comments"
+      },
+      "render": {
+        "fixture": {
+          "case": "hierarchy",
+          "bookmarks": 10000,
+          "folders": 1000,
+          "maximumDepth": 10,
+          "maximumFieldSamples": false
+        },
+        "browserVersion": "151.0.7922.34",
+        "runs": 5,
+        "summary": {
+          "coldBrowseMs": 441.10000014305115,
+          "warmBrowseMs": 242.5,
+          "folderPaintMs": 51.700000047683716,
+          "renderedCards": 10
+        },
+        "samples": [
+          {
+            "coldBrowseMs": 487.59999990463257,
+            "warmBrowseMs": 247.10000014305115,
+            "folderPaintMs": 51.799999952316284,
+            "renderedCards": 10
+          },
+          {
+            "coldBrowseMs": 441.10000014305115,
+            "warmBrowseMs": 242.5,
+            "folderPaintMs": 51.700000047683716,
+            "renderedCards": 10
+          },
+          {
+            "coldBrowseMs": 449.59999990463257,
+            "warmBrowseMs": 238.80000019073486,
+            "folderPaintMs": 50.799999952316284,
+            "renderedCards": 10
+          },
+          {
+            "coldBrowseMs": 431.7999999523163,
+            "warmBrowseMs": 221.5,
+            "folderPaintMs": 51.299999952316284,
+            "renderedCards": 10
+          },
+          {
+            "coldBrowseMs": 435.60000014305115,
+            "warmBrowseMs": 246.29999995231628,
+            "folderPaintMs": 59.799999952316284,
+            "renderedCards": 10
+          }
+        ]
+      },
+      "memory": {
+        "fixture": {
+          "case": "hierarchy",
+          "bookmarks": 10000,
+          "folders": 1000,
+          "maximumDepth": 10,
+          "maximumFieldSamples": false
+        },
+        "browserVersion": "151.0.7922.34",
+        "nodeVersion": "v24.13.0",
+        "runs": 3,
+        "summary": [
+          {
+            "phase": "root",
+            "mainHeapBytes": 6164240,
+            "searchHeapBytes": 11871556,
+            "totalHeapBytes": 18035972,
+            "domNodes": 191
+          },
+          {
+            "phase": "folder",
+            "mainHeapBytes": 6635952,
+            "searchHeapBytes": 11871556,
+            "totalHeapBytes": 18507488,
+            "domNodes": 1590
+          },
+          {
+            "phase": "returned",
+            "mainHeapBytes": 6527820,
+            "searchHeapBytes": 11871556,
+            "totalHeapBytes": 18399760,
+            "domNodes": 192
+          }
+        ],
+        "samples": [
+          {
+            "run": 0,
+            "phase": "root",
+            "mainHeapBytes": 6164240,
+            "searchHeapBytes": 11871536,
+            "totalHeapBytes": 18035776,
+            "domNodes": 191
+          },
+          {
+            "run": 0,
+            "phase": "folder",
+            "mainHeapBytes": 6635952,
+            "searchHeapBytes": 11871536,
+            "totalHeapBytes": 18507488,
+            "domNodes": 1590
+          },
+          {
+            "run": 0,
+            "phase": "returned",
+            "mainHeapBytes": 6527820,
+            "searchHeapBytes": 11871536,
+            "totalHeapBytes": 18399356,
+            "domNodes": 192
+          },
+          {
+            "run": 1,
+            "phase": "root",
+            "mainHeapBytes": 6164416,
+            "searchHeapBytes": 11871556,
+            "totalHeapBytes": 18035972,
+            "domNodes": 191
+          },
+          {
+            "run": 1,
+            "phase": "folder",
+            "mainHeapBytes": 6635724,
+            "searchHeapBytes": 11871556,
+            "totalHeapBytes": 18507280,
+            "domNodes": 1590
+          },
+          {
+            "run": 1,
+            "phase": "returned",
+            "mainHeapBytes": 6530524,
+            "searchHeapBytes": 11871556,
+            "totalHeapBytes": 18402080,
+            "domNodes": 192
+          },
+          {
+            "run": 2,
+            "phase": "root",
+            "mainHeapBytes": 6164080,
+            "searchHeapBytes": 11872996,
+            "totalHeapBytes": 18037076,
+            "domNodes": 191
+          },
+          {
+            "run": 2,
+            "phase": "folder",
+            "mainHeapBytes": 6636964,
+            "searchHeapBytes": 11872996,
+            "totalHeapBytes": 18509960,
+            "domNodes": 1650
+          },
+          {
+            "run": 2,
+            "phase": "returned",
+            "mainHeapBytes": 6526764,
+            "searchHeapBytes": 11872996,
+            "totalHeapBytes": 18399760,
+            "domNodes": 192
+          }
+        ]
+      }
+    }
+  },
+  "constantsProbe": {
+    "status": "temporary build only; not applied to master",
+    "bundle": {
+      "assets": [
+        {
+          "file": "/assets/index-B0U6Cheo.js",
+          "bytes": 141781,
+          "gzipBytes": 46532,
+          "brotliBytes": 41787
+        },
+        {
+          "file": "/assets/bookmark-search-worker-Rre8xCHi.js",
+          "bytes": 21581,
+          "gzipBytes": 7089,
+          "brotliBytes": 6385
+        },
+        {
+          "file": "/service-worker.js",
+          "bytes": 18095,
+          "gzipBytes": 6097,
+          "brotliBytes": 5525
+        }
+      ],
+      "compression": "Node zlib defaults; complete files including sourceMappingURL comments"
+    }
+  }
+}

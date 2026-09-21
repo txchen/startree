@@ -25,7 +25,7 @@ Startree is a private, self-hosted bookmark workspace designed to work as a brow
 
 | Area       | Technology                                    |
 | ---------- | --------------------------------------------- |
-| Client     | Vue 3, Vue Router, TypeScript                 |
+| Client     | Vue 3, TypeScript                             |
 | Search     | MiniSearch in a Web Worker                    |
 | API        | Hono on Cloudflare Workers                    |
 | Database   | Cloudflare D1                                 |
