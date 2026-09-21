@@ -13,6 +13,7 @@ import {
   createAndVerifyHostileFolder,
   verifyImmediateNavigationRetention,
   verifyNavigationDuringStartupRefresh,
+  verifyPageHistory,
 } from './local-worker-acceptance.mjs';
 import { run } from './process.mjs';
 
@@ -917,6 +918,7 @@ const verifyLocalWorker = async (scenario) => {
         if (await page.getByRole('button', { name: /Edit|Save|Delete|Move|Reorder/ }).count()) {
           throw new Error('The mobile read-only experience exposed editing controls.');
         }
+        await verifyPageHistory(page);
       }
     } finally {
       await browser.close();
