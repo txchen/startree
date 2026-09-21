@@ -8,6 +8,8 @@ const query = ref('');
 const selectedId = ref('');
 const mobileEditor = ref(false);
 const password = ref('');
+const secretInput = ref<HTMLInputElement>();
+watch(secretInput, (input) => input?.focus({ preventScroll: true }), { flush: 'post' });
 const confirmation = ref('');
 const recoveryMode = ref(false);
 const selectedDraft = ref('');
@@ -353,7 +355,7 @@ onUnmounted(() => {
       <button @click="session.initialize">Try again</button>
     </div>
     <div v-else-if="shielded" class="notes-unlock-area">
-      <form class="notes-unlock-card" @submit.prevent="resumeHidden">
+      <form class="notes-unlock-card" autocomplete="off" @submit.prevent="resumeHidden">
         <h2>Your notes are hidden</h2>
         <p>
           You have unsaved changes. They remain in memory without creating a version. Enter your
@@ -361,16 +363,22 @@ onUnmounted(() => {
         </p>
         <label
           >Notes password<input
+            ref="secretInput"
             v-model="password"
             type="password"
-            autocomplete="current-password"
+            autocomplete="off"
             required /></label
         ><button class="notes-primary" :disabled="formBusy">Resume unsaved notes</button>
       </form>
     </div>
     <template v-else-if="state.phase === 'locked' || settingUp">
       <div class="notes-unlock-area">
-        <form v-if="recoveryKey" class="notes-unlock-card" @submit.prevent="finishSetup">
+        <form
+          v-if="recoveryKey"
+          class="notes-unlock-card"
+          autocomplete="off"
+          @submit.prevent="finishSetup"
+        >
           <h2>Save your recovery key</h2>
           <p>
             Store this key outside Startree. It can unlock your notes if you forget the password.
@@ -400,7 +408,12 @@ onUnmounted(() => {
             Cancel
           </button>
         </form>
-        <form v-else-if="settingUp" class="notes-unlock-card" @submit.prevent="beginSetup">
+        <form
+          v-else-if="settingUp"
+          class="notes-unlock-card"
+          autocomplete="off"
+          @submit.prevent="beginSetup"
+        >
           <h2>
             {{ state.phase === 'setup' ? 'A private place to write' : 'Change notes password' }}
           </h2>
@@ -410,11 +423,12 @@ onUnmounted(() => {
           </p>
           <label
             >New notes password<input
+              ref="secretInput"
               v-model="password"
               type="password"
               minlength="12"
               maxlength="1024"
-              autocomplete="new-password"
+              autocomplete="off"
               required
           /></label>
           <label
@@ -423,7 +437,7 @@ onUnmounted(() => {
               type="password"
               minlength="12"
               maxlength="1024"
-              autocomplete="new-password"
+              autocomplete="off"
               required
           /></label>
           <button class="notes-primary" :disabled="formBusy">
@@ -445,7 +459,7 @@ onUnmounted(() => {
             Cancel
           </button>
         </form>
-        <form v-else class="notes-unlock-card" @submit.prevent="enter">
+        <form v-else class="notes-unlock-card" autocomplete="off" @submit.prevent="enter">
           <svg
             class="notes-lock-icon"
             viewBox="0 0 24 24"
@@ -474,9 +488,10 @@ onUnmounted(() => {
           <label
             >{{ recoveryMode ? 'Recovery key' : 'Notes password'
             }}<input
+              ref="secretInput"
               v-model="password"
               type="password"
-              :autocomplete="recoveryMode ? 'off' : 'current-password'"
+              autocomplete="off"
               maxlength="1024"
               required
           /></label>
