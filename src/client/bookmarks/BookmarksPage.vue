@@ -9,6 +9,7 @@ import type {
   BookmarkTrashRoot,
 } from '../../shared/bookmarks/contracts';
 import BookmarkCard from './BookmarkCard.vue';
+import PinnedBookmarks from './PinnedBookmarks.vue';
 import BookmarkEditorModal from './BookmarkEditorModal.vue';
 import type { BookmarkEditorValue } from './bookmark-editor';
 import {
@@ -139,6 +140,31 @@ const searchOpen = computed(
 const editingAvailable = computed(
   () => desktopEditingAvailable.value && state.value.syncStatus !== 'offline',
 );
+const pinWritable = computed(
+  () => state.value.syncStatus !== 'offline' && state.value.writeStatus !== 'pending',
+);
+const pinnedBookmarks = computed(() =>
+  state.value.bookmarks
+    .filter((bookmark) => bookmark.pinRank)
+    .sort((left, right) =>
+      left.pinRank! < right.pinRank!
+        ? -1
+        : left.pinRank! > right.pinRank!
+          ? 1
+          : left.id.localeCompare(right.id),
+    ),
+);
+const setBookmarkPin = async (bookmarkId: string, pinned: boolean, beforeBookmarkId?: string) => {
+  if (!pinWritable.value || state.value.snapshotRevision === null) return;
+  await stateModule.executeCommand({
+    type: 'setBookmarkPin',
+    operationId: crypto.randomUUID(),
+    bookmarkId,
+    pinned,
+    expectedRevision: state.value.snapshotRevision,
+    ...(beforeBookmarkId ? { beforeBookmarkId } : {}),
+  });
+};
 const editorKey = computed(() => {
   const activeEditor = editor.value;
   if (!activeEditor) return 'closed';
@@ -1205,6 +1231,12 @@ onUnmounted(() => {
       </div>
 
       <template v-else>
+        <PinnedBookmarks
+          v-if="!searchOpen"
+          :bookmarks="pinnedBookmarks"
+          :writable="pinWritable"
+          @change="setBookmarkPin"
+        />
         <nav v-if="state.breadcrumbs.length > 1" class="breadcrumb" aria-label="Breadcrumb">
           <template v-for="(folder, index) in state.breadcrumbs" :key="folder.id">
             <span v-if="index" aria-hidden="true">/</span>
@@ -1343,6 +1375,8 @@ onUnmounted(() => {
               :bookmark="bookmark"
               :tags="state.tagsByBookmark[bookmark.id] ?? []"
               :editable="editingAvailable && editMode"
+              :pin-writable="pinWritable"
+              @pin="setBookmarkPin(bookmark.id, !bookmark.pinRank)"
               @edit="openBookmarkEditor(bookmark)"
               @move="openMoveEditor('bookmark', bookmark.id)"
               @remove="trashBookmark(bookmark)"

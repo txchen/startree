@@ -16,6 +16,7 @@ import {
   verifyPageHistory,
 } from './local-worker-acceptance.mjs';
 import { run } from './process.mjs';
+import { verifyPinnedBookmarks } from './pinned-bookmarks-acceptance.mjs';
 
 const scenarioPorts = new Map([
   ['management', process.env.STARTREE_VERIFY_MANAGEMENT_PORT ?? '8788'],
@@ -30,6 +31,7 @@ const createPersistenceDirectory = () => {
     [
       'migrations/0001_initial_bookmark_schema.sql',
       'migrations/0002_bookmark_commands.sql',
+      'migrations/0003_bookmark_pins.sql',
       'tests/fixtures/read-only-bookmarks.sql',
     ]
       .map((path) => readFileSync(new URL(`../${path}`, import.meta.url), 'utf8'))
@@ -286,6 +288,7 @@ const verifyLocalWorker = async (scenario) => {
 
         await createAndVerifyHostileBookmark(page);
         await page.locator('.write-status.pending').waitFor({ state: 'detached' });
+        await verifyPinnedBookmarks(page, browser);
 
         const bookmarkCards = page.locator('.bookmark-card-shell');
         const firstBookmarkId = await bookmarkCards.nth(0).getAttribute('data-bookmark-id');

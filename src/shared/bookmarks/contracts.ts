@@ -89,6 +89,7 @@ export const bookmarkSchema = v.object({
   title: bookmarkTitleSchema,
   note: bookmarkNoteSchema,
   rank: rankSchema,
+  pinRank: v.optional(v.nullable(rankSchema)),
   createdAt: timestampSchema,
   modifiedAt: timestampSchema,
   version: entityVersionSchema,
@@ -269,7 +270,17 @@ export const emptyTrashCommandSchema = v.object({
   expectedRevision: v.pipe(v.number(), v.integer(), v.minValue(0)),
 });
 
+export const setBookmarkPinCommandSchema = v.object({
+  ...commandBase,
+  type: v.literal('setBookmarkPin'),
+  bookmarkId: identifierSchema,
+  pinned: v.boolean(),
+  beforeBookmarkId: v.optional(identifierSchema),
+  expectedRevision: v.pipe(v.number(), v.integer(), v.minValue(0)),
+});
+
 export const bookmarkCommandSchema = v.variant('type', [
+  setBookmarkPinCommandSchema,
   createFolderCommandSchema,
   editFolderCommandSchema,
   createBookmarkCommandSchema,
@@ -329,6 +340,8 @@ export const visitBookmarkCommand = <Result>(
   handlers: BookmarkCommandHandlers<Result>,
 ): Result => {
   switch (command.type) {
+    case 'setBookmarkPin':
+      return handlers.setBookmarkPin(command);
     case 'createFolder':
       return handlers.createFolder(command);
     case 'editFolder':

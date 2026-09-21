@@ -97,6 +97,7 @@ const readSnapshot = async (database: BookmarkDatabase): Promise<BookmarkSnapsho
               bookmarks.title,
               bookmarks.note,
               bookmarks.rank,
+              bookmarks.pin_rank AS pinRank,
               bookmarks.created_at AS createdAt,
               bookmarks.modified_at AS modifiedAt,
               bookmarks.version AS version
@@ -166,7 +167,7 @@ const readTrash = async (database: BookmarkDatabase): Promise<BookmarkTrash> => 
         ORDER BY COALESCE(trash_root_id, id), parent_id, rank, id`,
     ),
     database.prepare(
-      `SELECT id, folder_id AS folderId, url, title, note, rank,
+      `SELECT id, folder_id AS folderId, url, title, note, rank, pin_rank AS pinRank,
               created_at AS createdAt, modified_at AS modifiedAt, version
          FROM bookmarks
         WHERE trashed_at IS NOT NULL OR trash_root_id IS NOT NULL
@@ -202,7 +203,7 @@ const folderStatement = (database: BookmarkDatabase, folderId: string) =>
 const bookmarkStatement = (database: BookmarkDatabase, bookmarkId: string) =>
   database
     .prepare(
-      `SELECT id, folder_id AS folderId, url, title, note, rank,
+      `SELECT id, folder_id AS folderId, url, title, note, rank, pin_rank AS pinRank,
               created_at AS createdAt, modified_at AS modifiedAt, version
          FROM bookmarks
         WHERE id = ? AND trashed_at IS NULL AND trash_root_id IS NULL`,
@@ -538,6 +539,9 @@ export const createBookmarkService = (
 
   const classifyAssertionConflict = (command: BookmarkCommand) =>
     visitBookmarkCommand(command, {
+      async setBookmarkPin(pinCommand) {
+        return conflict(pinCommand, 'stale_sequence');
+      },
       async createFolder(createCommand) {
         const [parent, duplicate] = await Promise.all([
           folderStatement(database, createCommand.parentId).first<FolderRow>(),
@@ -1736,6 +1740,60 @@ export const createBookmarkService = (
                   'INSERT INTO bookmark_tags (bookmark_id, display_value, lowercase_key) VALUES (?, ?, ?)',
                 )
                 .bind(command.bookmarkId, value, value.toLocaleLowerCase()),
+            ),
+            database.prepare(
+              "UPDATE bookmark_domain_state SET revision = revision + 1 WHERE name = 'bookmarks'",
+            ),
+            ...storeResultStatements(command, result, timestamp, expiresAt),
+          ]);
+          return result;
+        },
+        setBookmarkPin: async (command) => {
+          const snapshot = await readSnapshot(database);
+          if (snapshot.revision !== command.expectedRevision || snapshot.revision !== revision) {
+            return conflict(command, 'stale_sequence');
+          }
+          const bookmark = snapshot.bookmarks.find((item) => item.id === command.bookmarkId);
+          if (!bookmark) return conflict(command, 'missing_entity');
+          if (!command.pinned && command.beforeBookmarkId) {
+            return conflict(command, 'invalid_position');
+          }
+          // Include hidden pins so restoring Trash preserves its place even after a rebalance.
+          const pins = await database
+            .prepare(
+              'SELECT id, pin_rank AS rank FROM bookmarks WHERE pin_rank IS NOT NULL ORDER BY pin_rank, id',
+            )
+            .all<RankedRow>();
+          if (
+            command.beforeBookmarkId &&
+            !snapshot.bookmarks.some((item) => item.id === command.beforeBookmarkId && item.pinRank)
+          )
+            return conflict(command, 'invalid_position');
+          const positions = command.pinned
+            ? positionedRanks(pins.results, bookmark.id, command.beforeBookmarkId)
+            : { ranks: new Map<string, Rank | null>([[bookmark.id, null]]) };
+          if (!positions) return conflict(command, 'invalid_position');
+          const result = v.parse(bookmarkCommandResultSchema, {
+            status: 'acknowledged',
+            operationId: command.operationId,
+            revision: revision + 1,
+            folders: [],
+            bookmarks: snapshot.bookmarks
+              .filter((item) => positions.ranks.has(item.id))
+              .map((item) => ({ ...item, pinRank: positions.ranks.get(item.id) })),
+            tags: snapshot.tags.filter((tag) => positions.ranks.has(tag.bookmarkId)),
+            sequences: [],
+          });
+          await beforeCommandBatch();
+          await database.batch([
+            database
+              .prepare(`INSERT INTO bookmark_command_assertions (operation_id, valid)
+              SELECT ?, CASE WHEN
+                (SELECT revision FROM bookmark_domain_state WHERE name = 'bookmarks') = ?
+              THEN 1 ELSE 0 END`)
+              .bind(command.operationId, revision),
+            ...[...positions.ranks].map(([id, rank]) =>
+              database.prepare('UPDATE bookmarks SET pin_rank = ? WHERE id = ?').bind(rank, id),
             ),
             database.prepare(
               "UPDATE bookmark_domain_state SET revision = revision + 1 WHERE name = 'bookmarks'",

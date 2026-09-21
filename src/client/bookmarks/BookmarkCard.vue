@@ -7,11 +7,13 @@ const props = defineProps<{
   bookmark: Bookmark;
   tags: readonly string[];
   editable: boolean;
+  pinWritable: boolean;
 }>();
 const emit = defineEmits<{
   edit: [];
   move: [];
   remove: [];
+  pin: [];
   dragstart: [];
   drop: [event: DragEvent];
 }>();
@@ -30,6 +32,7 @@ const activate = (event: MouseEvent) => {
 <template>
   <article
     class="bookmark-card-shell"
+    :class="{ 'has-pin-control': !editable }"
     :data-bookmark-id="bookmark.id"
     :draggable="editable"
     @dragstart="emit('dragstart')"
@@ -69,6 +72,18 @@ const activate = (event: MouseEvent) => {
         </span>
       </span>
     </a>
+    <button
+      v-if="!editable"
+      class="bookmark-pin-button"
+      type="button"
+      :disabled="!pinWritable"
+      :aria-label="`${bookmark.pinRank ? 'Unpin' : 'Pin'} ${bookmark.title}`"
+      :aria-pressed="Boolean(bookmark.pinRank)"
+      :title="bookmark.pinRank ? 'Unpin Bookmark' : 'Pin Bookmark'"
+      @click="emit('pin')"
+    >
+      <span aria-hidden="true">{{ bookmark.pinRank ? '★' : '☆' }}</span>
+    </button>
     <button
       v-if="editable"
       class="bookmark-edit-button desktop-edit-controls"

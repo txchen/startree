@@ -16,6 +16,7 @@ describe('Bookmark Service Interface', () => {
     for (const migration of [
       '../../../migrations/0001_initial_bookmark_schema.sql',
       '../../../migrations/0002_bookmark_commands.sql',
+      '../../../migrations/0003_bookmark_pins.sql',
     ]) {
       database.exec(readFileSync(new URL(migration, import.meta.url), 'utf8'));
     }

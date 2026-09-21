@@ -9,6 +9,7 @@ Startree is a private, self-hosted bookmark workspace designed to work as a brow
 ## Features
 
 - Hierarchical Folders with a resizable desktop tree and a mobile drawer
+- Cross-Folder pinned Bookmarks with manual ordering, cloud synchronization, and offline browsing
 - Compact Bookmark cards with optional Tags and Notes
 - Fast local search across Folder names, titles, URLs, Tags, and Notes, with Tag and domain filters
 - Keyboard-first search with `/`, `Cmd/Ctrl+K`, arrow keys, `Enter`, and `Cmd/Ctrl+Enter`

@@ -13,6 +13,7 @@ export const startPerformanceBrowserFixture = async (fixtureCase = 'hierarchy') 
   for (const path of [
     'migrations/0001_initial_bookmark_schema.sql',
     'migrations/0002_bookmark_commands.sql',
+    'migrations/0003_bookmark_pins.sql',
   ])
     db.exec(readFileSync(`${root}/${path}`, 'utf8'));
   const fixture = buildPerformanceFixture(fixtureCase);

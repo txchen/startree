@@ -428,6 +428,8 @@ export const createBookmarkState = (adapters: {
     if (!state.snapshot) return;
     const timestamp = new Date(lifecycle.now()).toISOString();
     visitBookmarkCommand(command, {
+      // Pin ranks are assigned by the server; retain the current order until acknowledged.
+      setBookmarkPin() {},
       createFolder(createCommand) {
         state.snapshot?.folders.push({
           id: createCommand.operationId,

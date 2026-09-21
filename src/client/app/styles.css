@@ -1444,3 +1444,108 @@ h2 {
     font-size: 1.7rem;
   }
 }
+
+.pinned-bookmarks {
+  margin-bottom: 24px;
+}
+
+.pinned-bookmarks > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.pinned-bookmarks h2 {
+  margin: 0;
+  color: #526359;
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+
+.pinned-bookmarks button {
+  min-height: 28px;
+  padding: 4px 8px;
+  border: 1px solid #dce2dd;
+  border-radius: 6px;
+  color: #526359;
+  background: #fff;
+  cursor: pointer;
+  font-size: 0.75rem;
+}
+
+.pinned-bookmarks button:disabled,
+.bookmark-pin-button:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+
+.pinned-bookmarks ul {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.pinned-bookmarks li {
+  max-width: 100%;
+  overflow: hidden;
+  border: 1px solid #dce2dd;
+  border-radius: 8px;
+  background: #fff;
+}
+
+.pinned-bookmarks a {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 240px;
+  padding: 9px 12px;
+  color: #365943;
+  font-size: 0.85rem;
+  text-decoration: none;
+}
+
+.pinned-bookmarks a:hover {
+  background: #f1f5f2;
+}
+
+.pinned-bookmarks a span:last-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pin-actions {
+  display: flex;
+  gap: 4px;
+  padding: 0 6px 6px;
+}
+
+.has-pin-control .bookmark-card {
+  padding-right: 38px;
+}
+
+.bookmark-pin-button {
+  position: absolute;
+  top: 6px;
+  right: 5px;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  color: #68766c;
+  background: transparent;
+  cursor: pointer;
+  font-size: 1rem;
+}
+
+.bookmark-pin-button:hover,
+.bookmark-pin-button[aria-pressed='true'] {
+  color: #365943;
+  background: #edf3ee;
+}
