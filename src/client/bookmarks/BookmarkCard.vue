@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue';
+import { computed } from 'vue';
 
 import type { Bookmark } from '../../shared/bookmarks/contracts';
+import BookmarkFavicon from './BookmarkFavicon.vue';
 
 const props = defineProps<{
   bookmark: Bookmark;
@@ -18,9 +19,7 @@ const emit = defineEmits<{
   drop: [event: DragEvent];
 }>();
 
-const faviconFailed = ref(false);
 const destination = computed(() => new URL(props.bookmark.url));
-const fallbackMark = computed(() => destination.value.hostname.charAt(0).toUpperCase() || '↗');
 
 const activate = (event: MouseEvent) => {
   if (!props.editable) return;
@@ -48,21 +47,7 @@ const activate = (event: MouseEvent) => {
       :draggable="editable ? false : undefined"
       @click="activate"
     >
-      <span class="bookmark-favicon" aria-hidden="true">
-        <img
-          v-if="!faviconFailed"
-          :src="`${destination.origin}/favicon.ico`"
-          alt=""
-          width="18"
-          height="18"
-          loading="lazy"
-          decoding="async"
-          fetchpriority="low"
-          referrerpolicy="no-referrer"
-          @error="faviconFailed = true"
-        />
-        <span v-else>{{ fallbackMark }}</span>
-      </span>
+      <BookmarkFavicon :url="bookmark.url" />
       <span class="bookmark-copy">
         <strong>{{ bookmark.title }}</strong>
         <span class="bookmark-host">{{ destination.hostname }}</span>

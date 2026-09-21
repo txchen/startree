@@ -2,6 +2,7 @@
 import { ref } from 'vue';
 
 import type { Bookmark } from '../../shared/bookmarks/contracts';
+import BookmarkFavicon from './BookmarkFavicon.vue';
 
 defineProps<{
   bookmarks: readonly Bookmark[];
@@ -28,9 +29,9 @@ const managing = ref(false);
     </header>
     <ul id="pinned-list">
       <li v-for="(bookmark, index) in bookmarks" :key="bookmark.id" :data-pin-id="bookmark.id">
-        <a :href="bookmark.url" :title="bookmark.title">
-          <span aria-hidden="true">★</span>
-          <span>{{ bookmark.title }}</span>
+        <a :href="bookmark.url" :title="[bookmark.url, bookmark.note].filter(Boolean).join('\n')">
+          <BookmarkFavicon :url="bookmark.url" />
+          <span class="pinned-title">{{ bookmark.title }}</span>
         </a>
         <div v-if="managing" class="pin-actions">
           <button

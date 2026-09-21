@@ -1513,7 +1513,14 @@ h2 {
   background: #f1f5f2;
 }
 
-.pinned-bookmarks a span:last-child {
+.pinned-bookmarks .bookmark-favicon {
+  width: 22px;
+  height: 22px;
+  flex-shrink: 0;
+  border-radius: 5px;
+}
+
+.pinned-title {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
