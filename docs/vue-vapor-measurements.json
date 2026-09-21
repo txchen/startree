@@ -1,0 +1,2038 @@
+{
+  "baselineCommit": "bed022ca6600540f5c5672bb3c794049abb7d60a",
+  "date": "2026-09-21",
+  "variants": {
+    "baseline": {
+      "bundle": {
+        "assets": [
+          {
+            "file": "/assets/index-BJwAQXWO.js",
+            "bytes": 166270,
+            "gzipBytes": 55356,
+            "brotliBytes": 49655
+          },
+          {
+            "file": "/assets/bookmark-search-worker-BtK2WTE0.js",
+            "bytes": 29028,
+            "gzipBytes": 9223,
+            "brotliBytes": 8322
+          },
+          {
+            "file": "/service-worker.js",
+            "bytes": 25685,
+            "gzipBytes": 8275,
+            "brotliBytes": 7524
+          }
+        ],
+        "compression": "Node zlib defaults; complete files including sourceMappingURL comments"
+      },
+      "hierarchy": {
+        "render": {
+          "fixture": {
+            "case": "hierarchy",
+            "bookmarks": 10000,
+            "folders": 1000,
+            "maximumDepth": 10,
+            "maximumFieldSamples": false
+          },
+          "browserVersion": "151.0.7922.34",
+          "runs": 5,
+          "summary": {
+            "coldBrowseMs": 445.80000019073486,
+            "warmBrowseMs": 249.89999985694885,
+            "folderPaintMs": 54.299999952316284,
+            "renderedCards": 10
+          },
+          "samples": [
+            {
+              "coldBrowseMs": 495,
+              "warmBrowseMs": 251.79999995231628,
+              "folderPaintMs": 51.5,
+              "renderedCards": 10
+            },
+            {
+              "coldBrowseMs": 443.2999999523163,
+              "warmBrowseMs": 242.70000004768372,
+              "folderPaintMs": 55.10000014305115,
+              "renderedCards": 10
+            },
+            {
+              "coldBrowseMs": 444.2999999523163,
+              "warmBrowseMs": 246,
+              "folderPaintMs": 58.799999952316284,
+              "renderedCards": 10
+            },
+            {
+              "coldBrowseMs": 474.2999999523163,
+              "warmBrowseMs": 249.89999985694885,
+              "folderPaintMs": 54.299999952316284,
+              "renderedCards": 10
+            },
+            {
+              "coldBrowseMs": 445.80000019073486,
+              "warmBrowseMs": 293,
+              "folderPaintMs": 52.5,
+              "renderedCards": 10
+            }
+          ]
+        },
+        "memory": {
+          "fixture": {
+            "case": "hierarchy",
+            "bookmarks": 10000,
+            "folders": 1000,
+            "maximumDepth": 10,
+            "maximumFieldSamples": false
+          },
+          "browserVersion": "151.0.7922.34",
+          "nodeVersion": "v24.13.0",
+          "runs": 3,
+          "summary": [
+            {
+              "phase": "root",
+              "mainHeapBytes": 6310176,
+              "searchHeapBytes": 11873008,
+              "totalHeapBytes": 18183184,
+              "domNodes": 191
+            },
+            {
+              "phase": "folder",
+              "mainHeapBytes": 6775116,
+              "searchHeapBytes": 11873008,
+              "totalHeapBytes": 18648124,
+              "domNodes": 1644
+            },
+            {
+              "phase": "returned",
+              "mainHeapBytes": 6674160,
+              "searchHeapBytes": 11873008,
+              "totalHeapBytes": 18547168,
+              "domNodes": 192
+            }
+          ],
+          "samples": [
+            {
+              "run": 0,
+              "phase": "root",
+              "mainHeapBytes": 6310512,
+              "searchHeapBytes": 11874372,
+              "totalHeapBytes": 18184884,
+              "domNodes": 191
+            },
+            {
+              "run": 0,
+              "phase": "folder",
+              "mainHeapBytes": 6775612,
+              "searchHeapBytes": 11874372,
+              "totalHeapBytes": 18649984,
+              "domNodes": 1644
+            },
+            {
+              "run": 0,
+              "phase": "returned",
+              "mainHeapBytes": 6674496,
+              "searchHeapBytes": 11874372,
+              "totalHeapBytes": 18548868,
+              "domNodes": 192
+            },
+            {
+              "run": 1,
+              "phase": "root",
+              "mainHeapBytes": 6310176,
+              "searchHeapBytes": 11872972,
+              "totalHeapBytes": 18183148,
+              "domNodes": 191
+            },
+            {
+              "run": 1,
+              "phase": "folder",
+              "mainHeapBytes": 6773312,
+              "searchHeapBytes": 11872972,
+              "totalHeapBytes": 18646284,
+              "domNodes": 1590
+            },
+            {
+              "run": 1,
+              "phase": "returned",
+              "mainHeapBytes": 6674132,
+              "searchHeapBytes": 11872972,
+              "totalHeapBytes": 18547104,
+              "domNodes": 192
+            },
+            {
+              "run": 2,
+              "phase": "root",
+              "mainHeapBytes": 6310176,
+              "searchHeapBytes": 11873008,
+              "totalHeapBytes": 18183184,
+              "domNodes": 191
+            },
+            {
+              "run": 2,
+              "phase": "folder",
+              "mainHeapBytes": 6775116,
+              "searchHeapBytes": 11873008,
+              "totalHeapBytes": 18648124,
+              "domNodes": 1650
+            },
+            {
+              "run": 2,
+              "phase": "returned",
+              "mainHeapBytes": 6674160,
+              "searchHeapBytes": 11873008,
+              "totalHeapBytes": 18547168,
+              "domNodes": 192
+            }
+          ]
+        },
+        "renderRepeat": {
+          "fixture": {
+            "case": "hierarchy",
+            "bookmarks": 10000,
+            "folders": 1000,
+            "maximumDepth": 10,
+            "maximumFieldSamples": false
+          },
+          "browserVersion": "151.0.7922.34",
+          "runs": 5,
+          "summary": {
+            "coldBrowseMs": 453.7999999523163,
+            "warmBrowseMs": 247.5,
+            "folderPaintMs": 56.19999980926514,
+            "renderedCards": 10
+          },
+          "samples": [
+            {
+              "coldBrowseMs": 487.60000014305115,
+              "warmBrowseMs": 257.40000009536743,
+              "folderPaintMs": 56.19999980926514,
+              "renderedCards": 10
+            },
+            {
+              "coldBrowseMs": 453.7999999523163,
+              "warmBrowseMs": 253.5,
+              "folderPaintMs": 57,
+              "renderedCards": 10
+            },
+            {
+              "coldBrowseMs": 478,
+              "warmBrowseMs": 245.89999985694885,
+              "folderPaintMs": 64.20000004768372,
+              "renderedCards": 10
+            },
+            {
+              "coldBrowseMs": 438.7000000476837,
+              "warmBrowseMs": 246.70000004768372,
+              "folderPaintMs": 55.90000009536743,
+              "renderedCards": 10
+            },
+            {
+              "coldBrowseMs": 436.80000019073486,
+              "warmBrowseMs": 247.5,
+              "folderPaintMs": 52.40000009536743,
+              "renderedCards": 10
+            }
+          ]
+        }
+      },
+      "concentration": {
+        "render": {
+          "fixture": {
+            "case": "concentration",
+            "bookmarks": 10000,
+            "folders": 1000,
+            "maximumDepth": 1,
+            "maximumFieldSamples": false,
+            "concentratedFolderId": "20000000-0000-4000-8000-000000000001"
+          },
+          "browserVersion": "151.0.7922.34",
+          "runs": 5,
+          "summary": {
+            "coldBrowseMs": 621.7000000476837,
+            "warmBrowseMs": 499.90000009536743,
+            "folderPaintMs": 3528.5999999046326,
+            "renderedCards": 10000
+          },
+          "samples": [
+            {
+              "coldBrowseMs": 621.7000000476837,
+              "warmBrowseMs": 429.39999985694885,
+              "folderPaintMs": 3058.800000190735,
+              "renderedCards": 10000
+            },
+            {
+              "coldBrowseMs": 715.3000001907349,
+              "warmBrowseMs": 472.2000000476837,
+              "folderPaintMs": 3528.5999999046326,
+              "renderedCards": 10000
+            },
+            {
+              "coldBrowseMs": 592.1999998092651,
+              "warmBrowseMs": 499.90000009536743,
+              "folderPaintMs": 3294.7999999523163,
+              "renderedCards": 10000
+            },
+            {
+              "coldBrowseMs": 595.6999998092651,
+              "warmBrowseMs": 549.1999998092651,
+              "folderPaintMs": 4082.5999999046326,
+              "renderedCards": 10000
+            },
+            {
+              "coldBrowseMs": 796,
+              "warmBrowseMs": 641.7000000476837,
+              "folderPaintMs": 4084.7999999523163,
+              "renderedCards": 10000
+            }
+          ]
+        },
+        "memory": {
+          "fixture": {
+            "case": "concentration",
+            "bookmarks": 10000,
+            "folders": 1000,
+            "maximumDepth": 1,
+            "maximumFieldSamples": false,
+            "concentratedFolderId": "20000000-0000-4000-8000-000000000001"
+          },
+          "browserVersion": "151.0.7922.34",
+          "nodeVersion": "v24.13.0",
+          "runs": 3,
+          "summary": [
+            {
+              "phase": "root",
+              "mainHeapBytes": 9998856,
+              "searchHeapBytes": 11813060,
+              "totalHeapBytes": 21811916,
+              "domNodes": 22168
+            },
+            {
+              "phase": "folder",
+              "mainHeapBytes": 65851024,
+              "searchHeapBytes": 11813060,
+              "totalHeapBytes": 77665032,
+              "domNodes": 185332
+            },
+            {
+              "phase": "returned",
+              "mainHeapBytes": 10159480,
+              "searchHeapBytes": 11813060,
+              "totalHeapBytes": 21972540,
+              "domNodes": 22169
+            }
+          ],
+          "samples": [
+            {
+              "run": 0,
+              "phase": "root",
+              "mainHeapBytes": 9998856,
+              "searchHeapBytes": 11813060,
+              "totalHeapBytes": 21811916,
+              "domNodes": 22168
+            },
+            {
+              "run": 0,
+              "phase": "folder",
+              "mainHeapBytes": 65851024,
+              "searchHeapBytes": 11813060,
+              "totalHeapBytes": 77664084,
+              "domNodes": 185332
+            },
+            {
+              "run": 0,
+              "phase": "returned",
+              "mainHeapBytes": 10159480,
+              "searchHeapBytes": 11813060,
+              "totalHeapBytes": 21972540,
+              "domNodes": 22169
+            },
+            {
+              "run": 1,
+              "phase": "root",
+              "mainHeapBytes": 9997936,
+              "searchHeapBytes": 11811172,
+              "totalHeapBytes": 21809108,
+              "domNodes": 22168
+            },
+            {
+              "run": 1,
+              "phase": "folder",
+              "mainHeapBytes": 65854760,
+              "searchHeapBytes": 11811172,
+              "totalHeapBytes": 77665932,
+              "domNodes": 185332
+            },
+            {
+              "run": 1,
+              "phase": "returned",
+              "mainHeapBytes": 10154888,
+              "searchHeapBytes": 11811172,
+              "totalHeapBytes": 21966060,
+              "domNodes": 22169
+            },
+            {
+              "run": 2,
+              "phase": "root",
+              "mainHeapBytes": 9998856,
+              "searchHeapBytes": 11814008,
+              "totalHeapBytes": 21812864,
+              "domNodes": 22168
+            },
+            {
+              "run": 2,
+              "phase": "folder",
+              "mainHeapBytes": 65851024,
+              "searchHeapBytes": 11814008,
+              "totalHeapBytes": 77665032,
+              "domNodes": 185332
+            },
+            {
+              "run": 2,
+              "phase": "returned",
+              "mainHeapBytes": 10159480,
+              "searchHeapBytes": 11814008,
+              "totalHeapBytes": 21973488,
+              "domNodes": 22169
+            }
+          ]
+        },
+        "renderRepeat": {
+          "fixture": {
+            "case": "concentration",
+            "bookmarks": 10000,
+            "folders": 1000,
+            "maximumDepth": 1,
+            "maximumFieldSamples": false,
+            "concentratedFolderId": "20000000-0000-4000-8000-000000000001"
+          },
+          "browserVersion": "151.0.7922.34",
+          "runs": 5,
+          "summary": {
+            "coldBrowseMs": 591.5999999046326,
+            "warmBrowseMs": 478,
+            "folderPaintMs": 3053.2999999523163,
+            "renderedCards": 10000
+          },
+          "samples": [
+            {
+              "coldBrowseMs": 676.8999998569489,
+              "warmBrowseMs": 475.09999990463257,
+              "folderPaintMs": 3160.0999999046326,
+              "renderedCards": 10000
+            },
+            {
+              "coldBrowseMs": 695.2999999523163,
+              "warmBrowseMs": 496.5,
+              "folderPaintMs": 3111.699999809265,
+              "renderedCards": 10000
+            },
+            {
+              "coldBrowseMs": 591.5,
+              "warmBrowseMs": 478,
+              "folderPaintMs": 3021.100000143051,
+              "renderedCards": 10000
+            },
+            {
+              "coldBrowseMs": 588.5,
+              "warmBrowseMs": 476.10000014305115,
+              "folderPaintMs": 3033.899999856949,
+              "renderedCards": 10000
+            },
+            {
+              "coldBrowseMs": 591.5999999046326,
+              "warmBrowseMs": 490.2000000476837,
+              "folderPaintMs": 3053.2999999523163,
+              "renderedCards": 10000
+            }
+          ]
+        }
+      }
+    },
+    "vdom36": {
+      "bundle": {
+        "assets": [
+          {
+            "file": "/assets/index-m2s1TaPA.js",
+            "bytes": 173666,
+            "gzipBytes": 57642,
+            "brotliBytes": 51274
+          },
+          {
+            "file": "/assets/bookmark-search-worker-BtK2WTE0.js",
+            "bytes": 29028,
+            "gzipBytes": 9223,
+            "brotliBytes": 8322
+          },
+          {
+            "file": "/service-worker.js",
+            "bytes": 25685,
+            "gzipBytes": 8275,
+            "brotliBytes": 7533
+          }
+        ],
+        "compression": "Node zlib defaults; complete files including sourceMappingURL comments"
+      },
+      "hierarchy": {
+        "render": {
+          "fixture": {
+            "case": "hierarchy",
+            "bookmarks": 10000,
+            "folders": 1000,
+            "maximumDepth": 10,
+            "maximumFieldSamples": false
+          },
+          "browserVersion": "151.0.7922.34",
+          "runs": 5,
+          "summary": {
+            "coldBrowseMs": 441.90000009536743,
+            "warmBrowseMs": 248.20000004768372,
+            "folderPaintMs": 54.299999952316284,
+            "renderedCards": 10
+          },
+          "samples": [
+            {
+              "coldBrowseMs": 484.69999980926514,
+              "warmBrowseMs": 254.59999990463257,
+              "folderPaintMs": 53.299999952316284,
+              "renderedCards": 10
+            },
+            {
+              "coldBrowseMs": 446.59999990463257,
+              "warmBrowseMs": 247,
+              "folderPaintMs": 54.299999952316284,
+              "renderedCards": 10
+            },
+            {
+              "coldBrowseMs": 441.90000009536743,
+              "warmBrowseMs": 248.20000004768372,
+              "folderPaintMs": 58,
+              "renderedCards": 10
+            },
+            {
+              "coldBrowseMs": 440.2000000476837,
+              "warmBrowseMs": 244,
+              "folderPaintMs": 66.09999990463257,
+              "renderedCards": 10
+            },
+            {
+              "coldBrowseMs": 439.69999980926514,
+              "warmBrowseMs": 250.19999980926514,
+              "folderPaintMs": 52.90000009536743,
+              "renderedCards": 10
+            }
+          ]
+        },
+        "memory": {
+          "fixture": {
+            "case": "hierarchy",
+            "bookmarks": 10000,
+            "folders": 1000,
+            "maximumDepth": 10,
+            "maximumFieldSamples": false
+          },
+          "browserVersion": "151.0.7922.34",
+          "nodeVersion": "v24.13.0",
+          "runs": 3,
+          "summary": [
+            {
+              "phase": "root",
+              "mainHeapBytes": 6337268,
+              "searchHeapBytes": 11874740,
+              "totalHeapBytes": 18212008,
+              "domNodes": 191
+            },
+            {
+              "phase": "folder",
+              "mainHeapBytes": 6818032,
+              "searchHeapBytes": 11874740,
+              "totalHeapBytes": 18692772,
+              "domNodes": 1650
+            },
+            {
+              "phase": "returned",
+              "mainHeapBytes": 6706516,
+              "searchHeapBytes": 11874740,
+              "totalHeapBytes": 18581284,
+              "domNodes": 192
+            }
+          ],
+          "samples": [
+            {
+              "run": 0,
+              "phase": "root",
+              "mainHeapBytes": 6334608,
+              "searchHeapBytes": 11871412,
+              "totalHeapBytes": 18206020,
+              "domNodes": 191
+            },
+            {
+              "run": 0,
+              "phase": "folder",
+              "mainHeapBytes": 6822940,
+              "searchHeapBytes": 11871412,
+              "totalHeapBytes": 18694352,
+              "domNodes": 1650
+            },
+            {
+              "run": 0,
+              "phase": "returned",
+              "mainHeapBytes": 6706244,
+              "searchHeapBytes": 11871412,
+              "totalHeapBytes": 18577656,
+              "domNodes": 192
+            },
+            {
+              "run": 1,
+              "phase": "root",
+              "mainHeapBytes": 6337268,
+              "searchHeapBytes": 11875012,
+              "totalHeapBytes": 18212280,
+              "domNodes": 191
+            },
+            {
+              "run": 1,
+              "phase": "folder",
+              "mainHeapBytes": 6816228,
+              "searchHeapBytes": 11875012,
+              "totalHeapBytes": 18691240,
+              "domNodes": 1590
+            },
+            {
+              "run": 1,
+              "phase": "returned",
+              "mainHeapBytes": 6706516,
+              "searchHeapBytes": 11875012,
+              "totalHeapBytes": 18581528,
+              "domNodes": 192
+            },
+            {
+              "run": 2,
+              "phase": "root",
+              "mainHeapBytes": 6337268,
+              "searchHeapBytes": 11874740,
+              "totalHeapBytes": 18212008,
+              "domNodes": 191
+            },
+            {
+              "run": 2,
+              "phase": "folder",
+              "mainHeapBytes": 6818032,
+              "searchHeapBytes": 11874740,
+              "totalHeapBytes": 18692772,
+              "domNodes": 1650
+            },
+            {
+              "run": 2,
+              "phase": "returned",
+              "mainHeapBytes": 6706544,
+              "searchHeapBytes": 11874740,
+              "totalHeapBytes": 18581284,
+              "domNodes": 192
+            }
+          ]
+        }
+      },
+      "concentration": {
+        "render": {
+          "fixture": {
+            "case": "concentration",
+            "bookmarks": 10000,
+            "folders": 1000,
+            "maximumDepth": 1,
+            "maximumFieldSamples": false,
+            "concentratedFolderId": "20000000-0000-4000-8000-000000000001"
+          },
+          "browserVersion": "151.0.7922.34",
+          "runs": 5,
+          "summary": {
+            "coldBrowseMs": 606.7999999523163,
+            "warmBrowseMs": 488,
+            "folderPaintMs": 3058.2999999523163,
+            "renderedCards": 10000
+          },
+          "samples": [
+            {
+              "coldBrowseMs": 739.6000001430511,
+              "warmBrowseMs": 422.2000000476837,
+              "folderPaintMs": 3145.2999999523163,
+              "renderedCards": 10000
+            },
+            {
+              "coldBrowseMs": 600.4000000953674,
+              "warmBrowseMs": 491.5,
+              "folderPaintMs": 3047.7999999523163,
+              "renderedCards": 10000
+            },
+            {
+              "coldBrowseMs": 598.5,
+              "warmBrowseMs": 468.59999990463257,
+              "folderPaintMs": 3058.2999999523163,
+              "renderedCards": 10000
+            },
+            {
+              "coldBrowseMs": 644.6000001430511,
+              "warmBrowseMs": 509.10000014305115,
+              "folderPaintMs": 3064.2000000476837,
+              "renderedCards": 10000
+            },
+            {
+              "coldBrowseMs": 606.7999999523163,
+              "warmBrowseMs": 488,
+              "folderPaintMs": 3052.4000000953674,
+              "renderedCards": 10000
+            }
+          ]
+        },
+        "memory": {
+          "fixture": {
+            "case": "concentration",
+            "bookmarks": 10000,
+            "folders": 1000,
+            "maximumDepth": 1,
+            "maximumFieldSamples": false,
+            "concentratedFolderId": "20000000-0000-4000-8000-000000000001"
+          },
+          "browserVersion": "151.0.7922.34",
+          "nodeVersion": "v24.13.0",
+          "runs": 3,
+          "summary": [
+            {
+              "phase": "root",
+              "mainHeapBytes": 9998780,
+              "searchHeapBytes": 11811200,
+              "totalHeapBytes": 21809952,
+              "domNodes": 22168
+            },
+            {
+              "phase": "folder",
+              "mainHeapBytes": 63106500,
+              "searchHeapBytes": 11811200,
+              "totalHeapBytes": 74917672,
+              "domNodes": 185332
+            },
+            {
+              "phase": "returned",
+              "mainHeapBytes": 10242172,
+              "searchHeapBytes": 11811200,
+              "totalHeapBytes": 22053344,
+              "domNodes": 22169
+            }
+          ],
+          "samples": [
+            {
+              "run": 0,
+              "phase": "root",
+              "mainHeapBytes": 9999112,
+              "searchHeapBytes": 11811200,
+              "totalHeapBytes": 21810312,
+              "domNodes": 22168
+            },
+            {
+              "run": 0,
+              "phase": "folder",
+              "mainHeapBytes": 63106580,
+              "searchHeapBytes": 11811200,
+              "totalHeapBytes": 74917780,
+              "domNodes": 185332
+            },
+            {
+              "run": 0,
+              "phase": "returned",
+              "mainHeapBytes": 10242252,
+              "searchHeapBytes": 11811200,
+              "totalHeapBytes": 22053452,
+              "domNodes": 22169
+            },
+            {
+              "run": 1,
+              "phase": "root",
+              "mainHeapBytes": 9998392,
+              "searchHeapBytes": 11811212,
+              "totalHeapBytes": 21809604,
+              "domNodes": 22168
+            },
+            {
+              "run": 1,
+              "phase": "folder",
+              "mainHeapBytes": 63104852,
+              "searchHeapBytes": 11811212,
+              "totalHeapBytes": 74916064,
+              "domNodes": 185332
+            },
+            {
+              "run": 1,
+              "phase": "returned",
+              "mainHeapBytes": 10241528,
+              "searchHeapBytes": 11811212,
+              "totalHeapBytes": 22052740,
+              "domNodes": 22169
+            },
+            {
+              "run": 2,
+              "phase": "root",
+              "mainHeapBytes": 9998780,
+              "searchHeapBytes": 11811172,
+              "totalHeapBytes": 21809952,
+              "domNodes": 22168
+            },
+            {
+              "run": 2,
+              "phase": "folder",
+              "mainHeapBytes": 63106500,
+              "searchHeapBytes": 11811172,
+              "totalHeapBytes": 74917672,
+              "domNodes": 185332
+            },
+            {
+              "run": 2,
+              "phase": "returned",
+              "mainHeapBytes": 10242172,
+              "searchHeapBytes": 11811172,
+              "totalHeapBytes": 22053344,
+              "domNodes": 22169
+            }
+          ]
+        }
+      }
+    },
+    "vapor": {
+      "bundle": {
+        "assets": [
+          {
+            "file": "/assets/index-B2SEMD6z.js",
+            "bytes": 249357,
+            "gzipBytes": 84275,
+            "brotliBytes": 74129
+          },
+          {
+            "file": "/assets/bookmark-search-worker-BtK2WTE0.js",
+            "bytes": 29028,
+            "gzipBytes": 9223,
+            "brotliBytes": 8322
+          },
+          {
+            "file": "/service-worker.js",
+            "bytes": 25685,
+            "gzipBytes": 8274,
+            "brotliBytes": 7527
+          }
+        ],
+        "compression": "Node zlib defaults; complete files including sourceMappingURL comments"
+      },
+      "hierarchy": {
+        "render": {
+          "fixture": {
+            "case": "hierarchy",
+            "bookmarks": 10000,
+            "folders": 1000,
+            "maximumDepth": 10,
+            "maximumFieldSamples": false
+          },
+          "browserVersion": "151.0.7922.34",
+          "runs": 5,
+          "summary": {
+            "coldBrowseMs": 472.2999999523163,
+            "warmBrowseMs": 259.40000009536743,
+            "folderPaintMs": 57.59999990463257,
+            "renderedCards": 10
+          },
+          "samples": [
+            {
+              "coldBrowseMs": 516.5,
+              "warmBrowseMs": 269.7000000476837,
+              "folderPaintMs": 81.29999995231628,
+              "renderedCards": 10
+            },
+            {
+              "coldBrowseMs": 476.2999999523163,
+              "warmBrowseMs": 259.40000009536743,
+              "folderPaintMs": 57.59999990463257,
+              "renderedCards": 10
+            },
+            {
+              "coldBrowseMs": 472.2999999523163,
+              "warmBrowseMs": 258.5,
+              "folderPaintMs": 55,
+              "renderedCards": 10
+            },
+            {
+              "coldBrowseMs": 469.5,
+              "warmBrowseMs": 262,
+              "folderPaintMs": 59,
+              "renderedCards": 10
+            },
+            {
+              "coldBrowseMs": 467.80000019073486,
+              "warmBrowseMs": 259.2000000476837,
+              "folderPaintMs": 55.700000047683716,
+              "renderedCards": 10
+            }
+          ]
+        },
+        "memory": {
+          "fixture": {
+            "case": "hierarchy",
+            "bookmarks": 10000,
+            "folders": 1000,
+            "maximumDepth": 10,
+            "maximumFieldSamples": false
+          },
+          "browserVersion": "151.0.7922.34",
+          "nodeVersion": "v24.13.0",
+          "runs": 3,
+          "summary": [
+            {
+              "phase": "root",
+              "mainHeapBytes": 6426068,
+              "searchHeapBytes": 11872164,
+              "totalHeapBytes": 18297560,
+              "domNodes": 321
+            },
+            {
+              "phase": "folder",
+              "mainHeapBytes": 7037636,
+              "searchHeapBytes": 11872164,
+              "totalHeapBytes": 18909128,
+              "domNodes": 1824
+            },
+            {
+              "phase": "returned",
+              "mainHeapBytes": 6731008,
+              "searchHeapBytes": 11872164,
+              "totalHeapBytes": 18603172,
+              "domNodes": 347
+            }
+          ],
+          "samples": [
+            {
+              "run": 0,
+              "phase": "root",
+              "mainHeapBytes": 6420644,
+              "searchHeapBytes": 11872164,
+              "totalHeapBytes": 18292808,
+              "domNodes": 321
+            },
+            {
+              "run": 0,
+              "phase": "folder",
+              "mainHeapBytes": 7032004,
+              "searchHeapBytes": 11872164,
+              "totalHeapBytes": 18904168,
+              "domNodes": 1824
+            },
+            {
+              "run": 0,
+              "phase": "returned",
+              "mainHeapBytes": 6731008,
+              "searchHeapBytes": 11872164,
+              "totalHeapBytes": 18603172,
+              "domNodes": 347
+            },
+            {
+              "run": 1,
+              "phase": "root",
+              "mainHeapBytes": 6426068,
+              "searchHeapBytes": 11871492,
+              "totalHeapBytes": 18297560,
+              "domNodes": 321
+            },
+            {
+              "run": 1,
+              "phase": "folder",
+              "mainHeapBytes": 7037636,
+              "searchHeapBytes": 11871492,
+              "totalHeapBytes": 18909128,
+              "domNodes": 1824
+            },
+            {
+              "run": 1,
+              "phase": "returned",
+              "mainHeapBytes": 6730652,
+              "searchHeapBytes": 11871492,
+              "totalHeapBytes": 18602144,
+              "domNodes": 347
+            },
+            {
+              "run": 2,
+              "phase": "root",
+              "mainHeapBytes": 6426648,
+              "searchHeapBytes": 11875684,
+              "totalHeapBytes": 18302332,
+              "domNodes": 321
+            },
+            {
+              "run": 2,
+              "phase": "folder",
+              "mainHeapBytes": 7037876,
+              "searchHeapBytes": 11875684,
+              "totalHeapBytes": 18913560,
+              "domNodes": 1824
+            },
+            {
+              "run": 2,
+              "phase": "returned",
+              "mainHeapBytes": 6731128,
+              "searchHeapBytes": 11875684,
+              "totalHeapBytes": 18606812,
+              "domNodes": 347
+            }
+          ]
+        }
+      },
+      "concentration": {
+        "render": {
+          "fixture": {
+            "case": "concentration",
+            "bookmarks": 10000,
+            "folders": 1000,
+            "maximumDepth": 1,
+            "maximumFieldSamples": false,
+            "concentratedFolderId": "20000000-0000-4000-8000-000000000001"
+          },
+          "browserVersion": "151.0.7922.34",
+          "runs": 5,
+          "summary": {
+            "coldBrowseMs": 784.5999999046326,
+            "warmBrowseMs": 711,
+            "folderPaintMs": 4653.700000047684,
+            "renderedCards": 10000
+          },
+          "samples": [
+            {
+              "coldBrowseMs": 660.1000001430511,
+              "warmBrowseMs": 716.5,
+              "folderPaintMs": 4001.9000000953674,
+              "renderedCards": 10000
+            },
+            {
+              "coldBrowseMs": 889.3000001907349,
+              "warmBrowseMs": 1183.6000001430511,
+              "folderPaintMs": 9499.099999904633,
+              "renderedCards": 10000
+            },
+            {
+              "coldBrowseMs": 784.5999999046326,
+              "warmBrowseMs": 711,
+              "folderPaintMs": 5019,
+              "renderedCards": 10000
+            },
+            {
+              "coldBrowseMs": 1208.3999998569489,
+              "warmBrowseMs": 503.40000009536743,
+              "folderPaintMs": 4653.700000047684,
+              "renderedCards": 10000
+            },
+            {
+              "coldBrowseMs": 630,
+              "warmBrowseMs": 480,
+              "folderPaintMs": 3176.2999999523163,
+              "renderedCards": 10000
+            }
+          ]
+        },
+        "memory": {
+          "fixture": {
+            "case": "concentration",
+            "bookmarks": 10000,
+            "folders": 1000,
+            "maximumDepth": 1,
+            "maximumFieldSamples": false,
+            "concentratedFolderId": "20000000-0000-4000-8000-000000000001"
+          },
+          "browserVersion": "151.0.7922.34",
+          "nodeVersion": "v24.13.0",
+          "runs": 3,
+          "summary": [
+            {
+              "phase": "root",
+              "mainHeapBytes": 12487344,
+              "searchHeapBytes": 11814076,
+              "totalHeapBytes": 24301352,
+              "domNodes": 23296
+            },
+            {
+              "phase": "folder",
+              "mainHeapBytes": 86319212,
+              "searchHeapBytes": 11814076,
+              "totalHeapBytes": 98135408,
+              "domNodes": 196474
+            },
+            {
+              "phase": "returned",
+              "mainHeapBytes": 12184996,
+              "searchHeapBytes": 11814076,
+              "totalHeapBytes": 24001416,
+              "domNodes": 23323
+            }
+          ],
+          "samples": [
+            {
+              "run": 0,
+              "phase": "root",
+              "mainHeapBytes": 12494656,
+              "searchHeapBytes": 11816420,
+              "totalHeapBytes": 24311076,
+              "domNodes": 23296
+            },
+            {
+              "run": 0,
+              "phase": "folder",
+              "mainHeapBytes": 86319212,
+              "searchHeapBytes": 11816420,
+              "totalHeapBytes": 98135632,
+              "domNodes": 196474
+            },
+            {
+              "run": 0,
+              "phase": "returned",
+              "mainHeapBytes": 12184996,
+              "searchHeapBytes": 11816420,
+              "totalHeapBytes": 24001416,
+              "domNodes": 23323
+            },
+            {
+              "run": 1,
+              "phase": "root",
+              "mainHeapBytes": 12481360,
+              "searchHeapBytes": 11814076,
+              "totalHeapBytes": 24295436,
+              "domNodes": 23296
+            },
+            {
+              "run": 1,
+              "phase": "folder",
+              "mainHeapBytes": 86308372,
+              "searchHeapBytes": 11814076,
+              "totalHeapBytes": 98122448,
+              "domNodes": 196474
+            },
+            {
+              "run": 1,
+              "phase": "returned",
+              "mainHeapBytes": 12174992,
+              "searchHeapBytes": 11814076,
+              "totalHeapBytes": 23989068,
+              "domNodes": 23323
+            },
+            {
+              "run": 2,
+              "phase": "root",
+              "mainHeapBytes": 12487344,
+              "searchHeapBytes": 11814008,
+              "totalHeapBytes": 24301352,
+              "domNodes": 23296
+            },
+            {
+              "run": 2,
+              "phase": "folder",
+              "mainHeapBytes": 86321400,
+              "searchHeapBytes": 11814008,
+              "totalHeapBytes": 98135408,
+              "domNodes": 196474
+            },
+            {
+              "run": 2,
+              "phase": "returned",
+              "mainHeapBytes": 12188284,
+              "searchHeapBytes": 11814008,
+              "totalHeapBytes": 24002292,
+              "domNodes": 23323
+            }
+          ]
+        }
+      }
+    },
+    "pure": {
+      "bundle": {
+        "assets": [
+          {
+            "file": "/assets/index-JR4iHQDh.js",
+            "bytes": 142271,
+            "gzipBytes": 45723,
+            "brotliBytes": 40868
+          },
+          {
+            "file": "/assets/bookmark-search-worker-BtK2WTE0.js",
+            "bytes": 29028,
+            "gzipBytes": 9223,
+            "brotliBytes": 8322
+          },
+          {
+            "file": "/service-worker.js",
+            "bytes": 25685,
+            "gzipBytes": 8279,
+            "brotliBytes": 7522
+          }
+        ],
+        "compression": "Node zlib defaults; complete files including sourceMappingURL comments"
+      },
+      "hierarchy": {
+        "render": {
+          "fixture": {
+            "case": "hierarchy",
+            "bookmarks": 10000,
+            "folders": 1000,
+            "maximumDepth": 10,
+            "maximumFieldSamples": false
+          },
+          "browserVersion": "151.0.7922.34",
+          "runs": 5,
+          "summary": {
+            "coldBrowseMs": 431,
+            "warmBrowseMs": 236.19999980926514,
+            "folderPaintMs": 52.799999952316284,
+            "renderedCards": 10
+          },
+          "samples": [
+            {
+              "coldBrowseMs": 468.59999990463257,
+              "warmBrowseMs": 236.40000009536743,
+              "folderPaintMs": 52.30000019073486,
+              "renderedCards": 10
+            },
+            {
+              "coldBrowseMs": 431.7999999523163,
+              "warmBrowseMs": 239.20000004768372,
+              "folderPaintMs": 53.299999952316284,
+              "renderedCards": 10
+            },
+            {
+              "coldBrowseMs": 426.2000000476837,
+              "warmBrowseMs": 236.19999980926514,
+              "folderPaintMs": 52.89999985694885,
+              "renderedCards": 10
+            },
+            {
+              "coldBrowseMs": 426.10000014305115,
+              "warmBrowseMs": 232.09999990463257,
+              "folderPaintMs": 52.40000009536743,
+              "renderedCards": 10
+            },
+            {
+              "coldBrowseMs": 431,
+              "warmBrowseMs": 235.39999985694885,
+              "folderPaintMs": 52.799999952316284,
+              "renderedCards": 10
+            }
+          ]
+        },
+        "memory": {
+          "fixture": {
+            "case": "hierarchy",
+            "bookmarks": 10000,
+            "folders": 1000,
+            "maximumDepth": 10,
+            "maximumFieldSamples": false
+          },
+          "browserVersion": "151.0.7922.34",
+          "nodeVersion": "v24.13.0",
+          "runs": 3,
+          "summary": [
+            {
+              "phase": "root",
+              "mainHeapBytes": 6057752,
+              "searchHeapBytes": 11874080,
+              "totalHeapBytes": 17932016,
+              "domNodes": 318
+            },
+            {
+              "phase": "folder",
+              "mainHeapBytes": 6629228,
+              "searchHeapBytes": 11874080,
+              "totalHeapBytes": 18503308,
+              "domNodes": 1821
+            },
+            {
+              "phase": "returned",
+              "mainHeapBytes": 6339684,
+              "searchHeapBytes": 11874080,
+              "totalHeapBytes": 18214376,
+              "domNodes": 344
+            }
+          ],
+          "samples": [
+            {
+              "run": 0,
+              "phase": "root",
+              "mainHeapBytes": 6057172,
+              "searchHeapBytes": 11875540,
+              "totalHeapBytes": 17932712,
+              "domNodes": 318
+            },
+            {
+              "run": 0,
+              "phase": "folder",
+              "mainHeapBytes": 6629540,
+              "searchHeapBytes": 11875540,
+              "totalHeapBytes": 18505080,
+              "domNodes": 1821
+            },
+            {
+              "run": 0,
+              "phase": "returned",
+              "mainHeapBytes": 6339684,
+              "searchHeapBytes": 11875540,
+              "totalHeapBytes": 18215224,
+              "domNodes": 344
+            },
+            {
+              "run": 1,
+              "phase": "root",
+              "mainHeapBytes": 6060208,
+              "searchHeapBytes": 11871808,
+              "totalHeapBytes": 17932016,
+              "domNodes": 318
+            },
+            {
+              "run": 1,
+              "phase": "folder",
+              "mainHeapBytes": 6629076,
+              "searchHeapBytes": 11871808,
+              "totalHeapBytes": 18500884,
+              "domNodes": 1821
+            },
+            {
+              "run": 1,
+              "phase": "returned",
+              "mainHeapBytes": 6339664,
+              "searchHeapBytes": 11871808,
+              "totalHeapBytes": 18211472,
+              "domNodes": 344
+            },
+            {
+              "run": 2,
+              "phase": "root",
+              "mainHeapBytes": 6057752,
+              "searchHeapBytes": 11874080,
+              "totalHeapBytes": 17931832,
+              "domNodes": 318
+            },
+            {
+              "run": 2,
+              "phase": "folder",
+              "mainHeapBytes": 6629228,
+              "searchHeapBytes": 11874080,
+              "totalHeapBytes": 18503308,
+              "domNodes": 1803
+            },
+            {
+              "run": 2,
+              "phase": "returned",
+              "mainHeapBytes": 6340296,
+              "searchHeapBytes": 11874080,
+              "totalHeapBytes": 18214376,
+              "domNodes": 344
+            }
+          ]
+        },
+        "renderRepeat": {
+          "fixture": {
+            "case": "hierarchy",
+            "bookmarks": 10000,
+            "folders": 1000,
+            "maximumDepth": 10,
+            "maximumFieldSamples": false
+          },
+          "browserVersion": "151.0.7922.34",
+          "runs": 5,
+          "summary": {
+            "coldBrowseMs": 631.8999998569489,
+            "warmBrowseMs": 359.59999990463257,
+            "folderPaintMs": 79.70000004768372,
+            "renderedCards": 10
+          },
+          "samples": [
+            {
+              "coldBrowseMs": 631.8999998569489,
+              "warmBrowseMs": 356.09999990463257,
+              "folderPaintMs": 89.09999990463257,
+              "renderedCards": 10
+            },
+            {
+              "coldBrowseMs": 676.7999999523163,
+              "warmBrowseMs": 359.59999990463257,
+              "folderPaintMs": 74.10000014305115,
+              "renderedCards": 10
+            },
+            {
+              "coldBrowseMs": 651.4000000953674,
+              "warmBrowseMs": 415.39999985694885,
+              "folderPaintMs": 79.70000004768372,
+              "renderedCards": 10
+            },
+            {
+              "coldBrowseMs": 608.4000000953674,
+              "warmBrowseMs": 629.6000001430511,
+              "folderPaintMs": 70.59999990463257,
+              "renderedCards": 10
+            },
+            {
+              "coldBrowseMs": 604.5,
+              "warmBrowseMs": 341.39999985694885,
+              "folderPaintMs": 157.5,
+              "renderedCards": 10
+            }
+          ]
+        }
+      },
+      "concentration": {
+        "render": {
+          "fixture": {
+            "case": "concentration",
+            "bookmarks": 10000,
+            "folders": 1000,
+            "maximumDepth": 1,
+            "maximumFieldSamples": false,
+            "concentratedFolderId": "20000000-0000-4000-8000-000000000001"
+          },
+          "browserVersion": "151.0.7922.34",
+          "runs": 5,
+          "summary": {
+            "coldBrowseMs": 607.7999999523163,
+            "warmBrowseMs": 477.89999985694885,
+            "folderPaintMs": 3281.4000000953674,
+            "renderedCards": 10000
+          },
+          "samples": [
+            {
+              "coldBrowseMs": 627.0999999046326,
+              "warmBrowseMs": 471.7999999523163,
+              "folderPaintMs": 3355,
+              "renderedCards": 10000
+            },
+            {
+              "coldBrowseMs": 592.0999999046326,
+              "warmBrowseMs": 472.40000009536743,
+              "folderPaintMs": 3281.4000000953674,
+              "renderedCards": 10000
+            },
+            {
+              "coldBrowseMs": 690.4000000953674,
+              "warmBrowseMs": 485.19999980926514,
+              "folderPaintMs": 3139.4000000953674,
+              "renderedCards": 10000
+            },
+            {
+              "coldBrowseMs": 607.7999999523163,
+              "warmBrowseMs": 478.89999985694885,
+              "folderPaintMs": 3173.9000000953674,
+              "renderedCards": 10000
+            },
+            {
+              "coldBrowseMs": 595.5,
+              "warmBrowseMs": 477.89999985694885,
+              "folderPaintMs": 3308.2000000476837,
+              "renderedCards": 10000
+            }
+          ]
+        },
+        "memory": {
+          "fixture": {
+            "case": "concentration",
+            "bookmarks": 10000,
+            "folders": 1000,
+            "maximumDepth": 1,
+            "maximumFieldSamples": false,
+            "concentratedFolderId": "20000000-0000-4000-8000-000000000001"
+          },
+          "browserVersion": "151.0.7922.34",
+          "nodeVersion": "v24.13.0",
+          "runs": 3,
+          "summary": [
+            {
+              "phase": "root",
+              "mainHeapBytes": 11753864,
+              "searchHeapBytes": 11811172,
+              "totalHeapBytes": 23565036,
+              "domNodes": 23293
+            },
+            {
+              "phase": "folder",
+              "mainHeapBytes": 81806000,
+              "searchHeapBytes": 11811172,
+              "totalHeapBytes": 93619704,
+              "domNodes": 196471
+            },
+            {
+              "phase": "returned",
+              "mainHeapBytes": 11452476,
+              "searchHeapBytes": 11811172,
+              "totalHeapBytes": 23266524,
+              "domNodes": 23320
+            }
+          ],
+          "samples": [
+            {
+              "run": 0,
+              "phase": "root",
+              "mainHeapBytes": 11754916,
+              "searchHeapBytes": 11814048,
+              "totalHeapBytes": 23568964,
+              "domNodes": 23293
+            },
+            {
+              "run": 0,
+              "phase": "folder",
+              "mainHeapBytes": 81806000,
+              "searchHeapBytes": 11814048,
+              "totalHeapBytes": 93620048,
+              "domNodes": 196471
+            },
+            {
+              "run": 0,
+              "phase": "returned",
+              "mainHeapBytes": 11452476,
+              "searchHeapBytes": 11814048,
+              "totalHeapBytes": 23266524,
+              "domNodes": 23320
+            },
+            {
+              "run": 1,
+              "phase": "root",
+              "mainHeapBytes": 11753864,
+              "searchHeapBytes": 11811172,
+              "totalHeapBytes": 23565036,
+              "domNodes": 23293
+            },
+            {
+              "run": 1,
+              "phase": "folder",
+              "mainHeapBytes": 81805008,
+              "searchHeapBytes": 11811172,
+              "totalHeapBytes": 93616180,
+              "domNodes": 196471
+            },
+            {
+              "run": 1,
+              "phase": "returned",
+              "mainHeapBytes": 11450280,
+              "searchHeapBytes": 11811172,
+              "totalHeapBytes": 23261452,
+              "domNodes": 23320
+            },
+            {
+              "run": 2,
+              "phase": "root",
+              "mainHeapBytes": 11753400,
+              "searchHeapBytes": 11811172,
+              "totalHeapBytes": 23564572,
+              "domNodes": 23293
+            },
+            {
+              "run": 2,
+              "phase": "folder",
+              "mainHeapBytes": 81808532,
+              "searchHeapBytes": 11811172,
+              "totalHeapBytes": 93619704,
+              "domNodes": 196471
+            },
+            {
+              "run": 2,
+              "phase": "returned",
+              "mainHeapBytes": 11458500,
+              "searchHeapBytes": 11811172,
+              "totalHeapBytes": 23269672,
+              "domNodes": 23320
+            }
+          ]
+        },
+        "renderRepeat": {
+          "fixture": {
+            "case": "concentration",
+            "bookmarks": 10000,
+            "folders": 1000,
+            "maximumDepth": 1,
+            "maximumFieldSamples": false,
+            "concentratedFolderId": "20000000-0000-4000-8000-000000000001"
+          },
+          "browserVersion": "151.0.7922.34",
+          "runs": 5,
+          "summary": {
+            "coldBrowseMs": 658,
+            "warmBrowseMs": 488.5,
+            "folderPaintMs": 3324.7000000476837,
+            "renderedCards": 10000
+          },
+          "samples": [
+            {
+              "coldBrowseMs": 828.5999999046326,
+              "warmBrowseMs": 585,
+              "folderPaintMs": 4539.799999952316,
+              "renderedCards": 10000
+            },
+            {
+              "coldBrowseMs": 1007.2999999523163,
+              "warmBrowseMs": 590.7999999523163,
+              "folderPaintMs": 5349.299999952316,
+              "renderedCards": 10000
+            },
+            {
+              "coldBrowseMs": 658,
+              "warmBrowseMs": 457.7999999523163,
+              "folderPaintMs": 3256.600000143051,
+              "renderedCards": 10000
+            },
+            {
+              "coldBrowseMs": 594.4000000953674,
+              "warmBrowseMs": 481.40000009536743,
+              "folderPaintMs": 3287.2999999523163,
+              "renderedCards": 10000
+            },
+            {
+              "coldBrowseMs": 627,
+              "warmBrowseMs": 488.5,
+              "folderPaintMs": 3324.7000000476837,
+              "renderedCards": 10000
+            }
+          ]
+        }
+      }
+    },
+    "vdom-slim": {
+      "bundle": {
+        "assets": [
+          {
+            "file": "/assets/index-CUXPRukN.js",
+            "bytes": 149172,
+            "gzipBytes": 48858,
+            "brotliBytes": 43396
+          },
+          {
+            "file": "/assets/bookmark-search-worker-BtK2WTE0.js",
+            "bytes": 29028,
+            "gzipBytes": 9223,
+            "brotliBytes": 8322
+          },
+          {
+            "file": "/service-worker.js",
+            "bytes": 25685,
+            "gzipBytes": 8275,
+            "brotliBytes": 7528
+          }
+        ],
+        "compression": "Node zlib defaults; complete files including sourceMappingURL comments"
+      },
+      "hierarchy": {
+        "render": {
+          "fixture": {
+            "case": "hierarchy",
+            "bookmarks": 10000,
+            "folders": 1000,
+            "maximumDepth": 10,
+            "maximumFieldSamples": false
+          },
+          "browserVersion": "151.0.7922.34",
+          "runs": 5,
+          "summary": {
+            "coldBrowseMs": 434.7000000476837,
+            "warmBrowseMs": 240.40000009536743,
+            "folderPaintMs": 56.19999980926514,
+            "renderedCards": 10
+          },
+          "samples": [
+            {
+              "coldBrowseMs": 480.90000009536743,
+              "warmBrowseMs": 243,
+              "folderPaintMs": 53.700000047683716,
+              "renderedCards": 10
+            },
+            {
+              "coldBrowseMs": 434.7000000476837,
+              "warmBrowseMs": 235.40000009536743,
+              "folderPaintMs": 52.90000009536743,
+              "renderedCards": 10
+            },
+            {
+              "coldBrowseMs": 432.2999999523163,
+              "warmBrowseMs": 240.40000009536743,
+              "folderPaintMs": 56.19999980926514,
+              "renderedCards": 10
+            },
+            {
+              "coldBrowseMs": 483.2999999523163,
+              "warmBrowseMs": 242.5,
+              "folderPaintMs": 57.10000014305115,
+              "renderedCards": 10
+            },
+            {
+              "coldBrowseMs": 426.5,
+              "warmBrowseMs": 221.39999985694885,
+              "folderPaintMs": 56.40000009536743,
+              "renderedCards": 10
+            }
+          ]
+        },
+        "memory": {
+          "fixture": {
+            "case": "hierarchy",
+            "bookmarks": 10000,
+            "folders": 1000,
+            "maximumDepth": 10,
+            "maximumFieldSamples": false
+          },
+          "browserVersion": "151.0.7922.34",
+          "nodeVersion": "v24.13.0",
+          "runs": 3,
+          "summary": [
+            {
+              "phase": "root",
+              "mainHeapBytes": 6190096,
+              "searchHeapBytes": 11878044,
+              "totalHeapBytes": 18067140,
+              "domNodes": 191
+            },
+            {
+              "phase": "folder",
+              "mainHeapBytes": 6666720,
+              "searchHeapBytes": 11878044,
+              "totalHeapBytes": 18543320,
+              "domNodes": 1650
+            },
+            {
+              "phase": "returned",
+              "mainHeapBytes": 6559180,
+              "searchHeapBytes": 11878044,
+              "totalHeapBytes": 18437224,
+              "domNodes": 192
+            }
+          ],
+          "samples": [
+            {
+              "run": 0,
+              "phase": "root",
+              "mainHeapBytes": 6188904,
+              "searchHeapBytes": 11878236,
+              "totalHeapBytes": 18067140,
+              "domNodes": 191
+            },
+            {
+              "run": 0,
+              "phase": "folder",
+              "mainHeapBytes": 6665084,
+              "searchHeapBytes": 11878236,
+              "totalHeapBytes": 18543320,
+              "domNodes": 1590
+            },
+            {
+              "run": 0,
+              "phase": "returned",
+              "mainHeapBytes": 6555360,
+              "searchHeapBytes": 11878236,
+              "totalHeapBytes": 18433596,
+              "domNodes": 192
+            },
+            {
+              "run": 1,
+              "phase": "root",
+              "mainHeapBytes": 6190204,
+              "searchHeapBytes": 11875036,
+              "totalHeapBytes": 18065240,
+              "domNodes": 191
+            },
+            {
+              "run": 1,
+              "phase": "folder",
+              "mainHeapBytes": 6668004,
+              "searchHeapBytes": 11875036,
+              "totalHeapBytes": 18543040,
+              "domNodes": 1650
+            },
+            {
+              "run": 1,
+              "phase": "returned",
+              "mainHeapBytes": 6566284,
+              "searchHeapBytes": 11875036,
+              "totalHeapBytes": 18441320,
+              "domNodes": 192
+            },
+            {
+              "run": 2,
+              "phase": "root",
+              "mainHeapBytes": 6190096,
+              "searchHeapBytes": 11878044,
+              "totalHeapBytes": 18068140,
+              "domNodes": 191
+            },
+            {
+              "run": 2,
+              "phase": "folder",
+              "mainHeapBytes": 6666720,
+              "searchHeapBytes": 11878044,
+              "totalHeapBytes": 18544764,
+              "domNodes": 1650
+            },
+            {
+              "run": 2,
+              "phase": "returned",
+              "mainHeapBytes": 6559180,
+              "searchHeapBytes": 11878044,
+              "totalHeapBytes": 18437224,
+              "domNodes": 192
+            }
+          ]
+        },
+        "renderRepeat": {
+          "fixture": {
+            "case": "hierarchy",
+            "bookmarks": 10000,
+            "folders": 1000,
+            "maximumDepth": 10,
+            "maximumFieldSamples": false
+          },
+          "browserVersion": "151.0.7922.34",
+          "runs": 5,
+          "summary": {
+            "coldBrowseMs": 431.09999990463257,
+            "warmBrowseMs": 239.60000014305115,
+            "folderPaintMs": 55.09999990463257,
+            "renderedCards": 10
+          },
+          "samples": [
+            {
+              "coldBrowseMs": 467.60000014305115,
+              "warmBrowseMs": 258.39999985694885,
+              "folderPaintMs": 71.79999995231628,
+              "renderedCards": 10
+            },
+            {
+              "coldBrowseMs": 425.7999999523163,
+              "warmBrowseMs": 236.40000009536743,
+              "folderPaintMs": 58.5,
+              "renderedCards": 10
+            },
+            {
+              "coldBrowseMs": 431.09999990463257,
+              "warmBrowseMs": 238.29999995231628,
+              "folderPaintMs": 55.09999990463257,
+              "renderedCards": 10
+            },
+            {
+              "coldBrowseMs": 452,
+              "warmBrowseMs": 239.60000014305115,
+              "folderPaintMs": 52,
+              "renderedCards": 10
+            },
+            {
+              "coldBrowseMs": 428.5,
+              "warmBrowseMs": 239.89999985694885,
+              "folderPaintMs": 52.89999985694885,
+              "renderedCards": 10
+            }
+          ]
+        }
+      },
+      "concentration": {
+        "render": {
+          "fixture": {
+            "case": "concentration",
+            "bookmarks": 10000,
+            "folders": 1000,
+            "maximumDepth": 1,
+            "maximumFieldSamples": false,
+            "concentratedFolderId": "20000000-0000-4000-8000-000000000001"
+          },
+          "browserVersion": "151.0.7922.34",
+          "runs": 5,
+          "summary": {
+            "coldBrowseMs": 588.2999999523163,
+            "warmBrowseMs": 474.89999985694885,
+            "folderPaintMs": 3082.600000143051,
+            "renderedCards": 10000
+          },
+          "samples": [
+            {
+              "coldBrowseMs": 969,
+              "warmBrowseMs": 465,
+              "folderPaintMs": 5085.400000095367,
+              "renderedCards": 10000
+            },
+            {
+              "coldBrowseMs": 581.0999999046326,
+              "warmBrowseMs": 492,
+              "folderPaintMs": 3028.9000000953674,
+              "renderedCards": 10000
+            },
+            {
+              "coldBrowseMs": 586,
+              "warmBrowseMs": 485,
+              "folderPaintMs": 3345.7999999523163,
+              "renderedCards": 10000
+            },
+            {
+              "coldBrowseMs": 620.0999999046326,
+              "warmBrowseMs": 474.89999985694885,
+              "folderPaintMs": 3030.5999999046326,
+              "renderedCards": 10000
+            },
+            {
+              "coldBrowseMs": 588.2999999523163,
+              "warmBrowseMs": 458.10000014305115,
+              "folderPaintMs": 3082.600000143051,
+              "renderedCards": 10000
+            }
+          ]
+        },
+        "memory": {
+          "fixture": {
+            "case": "concentration",
+            "bookmarks": 10000,
+            "folders": 1000,
+            "maximumDepth": 1,
+            "maximumFieldSamples": false,
+            "concentratedFolderId": "20000000-0000-4000-8000-000000000001"
+          },
+          "browserVersion": "151.0.7922.34",
+          "nodeVersion": "v24.13.0",
+          "runs": 3,
+          "summary": [
+            {
+              "phase": "root",
+              "mainHeapBytes": 9849852,
+              "searchHeapBytes": 11811212,
+              "totalHeapBytes": 21661160,
+              "domNodes": 22168
+            },
+            {
+              "phase": "folder",
+              "mainHeapBytes": 62964648,
+              "searchHeapBytes": 11811212,
+              "totalHeapBytes": 74775820,
+              "domNodes": 185332
+            },
+            {
+              "phase": "returned",
+              "mainHeapBytes": 10097352,
+              "searchHeapBytes": 11811212,
+              "totalHeapBytes": 21908660,
+              "domNodes": 22169
+            }
+          ],
+          "samples": [
+            {
+              "run": 0,
+              "phase": "root",
+              "mainHeapBytes": 9849648,
+              "searchHeapBytes": 11811172,
+              "totalHeapBytes": 21660820,
+              "domNodes": 22168
+            },
+            {
+              "run": 0,
+              "phase": "folder",
+              "mainHeapBytes": 62964648,
+              "searchHeapBytes": 11811172,
+              "totalHeapBytes": 74775820,
+              "domNodes": 185332
+            },
+            {
+              "run": 0,
+              "phase": "returned",
+              "mainHeapBytes": 10097716,
+              "searchHeapBytes": 11811172,
+              "totalHeapBytes": 21908888,
+              "domNodes": 22169
+            },
+            {
+              "run": 1,
+              "phase": "root",
+              "mainHeapBytes": 9850064,
+              "searchHeapBytes": 11811212,
+              "totalHeapBytes": 21661276,
+              "domNodes": 22168
+            },
+            {
+              "run": 1,
+              "phase": "folder",
+              "mainHeapBytes": 62965320,
+              "searchHeapBytes": 11811212,
+              "totalHeapBytes": 74776532,
+              "domNodes": 185332
+            },
+            {
+              "run": 1,
+              "phase": "returned",
+              "mainHeapBytes": 10095476,
+              "searchHeapBytes": 11811212,
+              "totalHeapBytes": 21906688,
+              "domNodes": 22169
+            },
+            {
+              "run": 2,
+              "phase": "root",
+              "mainHeapBytes": 9849852,
+              "searchHeapBytes": 11811308,
+              "totalHeapBytes": 21661160,
+              "domNodes": 22168
+            },
+            {
+              "run": 2,
+              "phase": "folder",
+              "mainHeapBytes": 62964512,
+              "searchHeapBytes": 11811308,
+              "totalHeapBytes": 74775820,
+              "domNodes": 185332
+            },
+            {
+              "run": 2,
+              "phase": "returned",
+              "mainHeapBytes": 10097352,
+              "searchHeapBytes": 11811308,
+              "totalHeapBytes": 21908660,
+              "domNodes": 22169
+            }
+          ]
+        },
+        "renderRepeat": {
+          "fixture": {
+            "case": "concentration",
+            "bookmarks": 10000,
+            "folders": 1000,
+            "maximumDepth": 1,
+            "maximumFieldSamples": false,
+            "concentratedFolderId": "20000000-0000-4000-8000-000000000001"
+          },
+          "browserVersion": "151.0.7922.34",
+          "runs": 5,
+          "summary": {
+            "coldBrowseMs": 600.1000001430511,
+            "warmBrowseMs": 472.7000000476837,
+            "folderPaintMs": 3101,
+            "renderedCards": 10000
+          },
+          "samples": [
+            {
+              "coldBrowseMs": 630.7999999523163,
+              "warmBrowseMs": 463.5,
+              "folderPaintMs": 3167.0999999046326,
+              "renderedCards": 10000
+            },
+            {
+              "coldBrowseMs": 586.4000000953674,
+              "warmBrowseMs": 465.7999999523163,
+              "folderPaintMs": 3049.100000143051,
+              "renderedCards": 10000
+            },
+            {
+              "coldBrowseMs": 600.1000001430511,
+              "warmBrowseMs": 472.7000000476837,
+              "folderPaintMs": 3124.800000190735,
+              "renderedCards": 10000
+            },
+            {
+              "coldBrowseMs": 585.7999999523163,
+              "warmBrowseMs": 551.8999998569489,
+              "folderPaintMs": 3087.5,
+              "renderedCards": 10000
+            },
+            {
+              "coldBrowseMs": 752.7999999523163,
+              "warmBrowseMs": 485.5,
+              "folderPaintMs": 3101,
+              "renderedCards": 10000
+            }
+          ]
+        }
+      }
+    }
+  }
+}
