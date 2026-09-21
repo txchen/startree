@@ -24,7 +24,8 @@
     "performance:prepare:preview": "node scripts/prepare-preview-performance.mjs",
     "access:capture:preview": "node scripts/capture-access-state.mjs",
     "deploy:preview": "node scripts/deploy.mjs preview",
-    "deploy:production": "node scripts/deploy.mjs production"
+    "deploy:production": "node scripts/deploy.mjs production",
+    "prototype:notes": "vp dev --host 127.0.0.1 --port 5190"
   },
   "dependencies": {
     "hono": "^4.9.2",
