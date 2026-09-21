@@ -108,12 +108,16 @@ const measureModeChange = async (page) => {
 
 const measureFolderNavigation = async (page) => {
   const startingUrl = page.url();
+  const startingHeading = await page.getByRole('heading', { level: 1 }).textContent();
   const started = await page.evaluate(() => performance.now());
   await page.locator('.folder-tile > button').first().click();
-  await page.waitForURL((url) => url.toString() !== startingUrl);
-  await page.getByRole('heading', { level: 1 }).waitFor();
+  await page.waitForFunction(
+    (heading) => document.querySelector('h1')?.textContent !== heading,
+    startingHeading,
+  );
   const duration = await page.evaluate((start) => performance.now() - start, started);
-  await page.goBack();
+  if (page.url() !== startingUrl) throw new Error('Folder navigation changed the Page URL.');
+  await page.locator('#folder-sidebar .root-folder').click();
   await waitForBrowsableContent(page);
   return duration;
 };

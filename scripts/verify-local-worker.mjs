@@ -149,50 +149,31 @@ const verifyLocalWorker = async (scenario) => {
         await page.goto(`http://127.0.0.1:${port}/bookmarks`);
         await page.getByRole('heading', { level: 1, name: 'Bookmarks' }).waitFor();
         await assertAccessible(page, 'Bookmarks Page');
-        await page.evaluate(() => {
-          const replaceState = history.replaceState.bind(history);
-          document.body.dataset.folderNavigationTargetReplaceCount = '0';
-          history.replaceState = (...arguments_) => {
-            const url = arguments_[2];
-            if (
-              url &&
-              new URL(String(url), location.href).pathname ===
-                '/bookmarks/10000000-0000-4000-8000-000000000001'
-            ) {
-              document.body.dataset.folderNavigationTargetReplaceCount = String(
-                Number(document.body.dataset.folderNavigationTargetReplaceCount) + 1,
-              );
-            }
-            return replaceState(...arguments_);
-          };
-        });
+        const initialHistoryLength = await page.evaluate(() => history.length);
         await page.locator('.folder-grid button').filter({ hasText: 'Reading' }).click();
-        await page.waitForURL(`**/bookmarks/10000000-0000-4000-8000-000000000001`);
-        if (
-          (await page
-            .locator('body')
-            .getAttribute('data-folder-navigation-target-replace-count')) !== '0'
-        ) {
-          throw new Error('Folder navigation raced an unsolicited history replacement.');
-        }
         await page.getByRole('heading', { level: 1, name: 'Reading' }).waitFor();
+        if (
+          new URL(page.url()).pathname !== '/bookmarks' ||
+          (await page.evaluate(() => history.length)) !== initialHistoryLength
+        ) {
+          throw new Error('Folder navigation changed the Page URL or added browser history.');
+        }
 
         const restoredPage = await browserContext.newPage();
         await restoredPage.goto(`http://127.0.0.1:${port}/`);
-        await restoredPage.waitForURL(`**/bookmarks/10000000-0000-4000-8000-000000000001`);
         await restoredPage.getByRole('heading', { level: 1, name: 'Reading' }).waitFor();
         await restoredPage.locator('.folder-grid button').filter({ hasText: 'Articles' }).click();
-        await restoredPage.waitForURL(`**/bookmarks/10000000-0000-4000-8000-000000000003`);
+        await restoredPage.getByRole('heading', { level: 1, name: 'Articles' }).waitFor();
         await restoredPage.close();
 
         const immediateRestorePage = await browserContext.newPage();
         await immediateRestorePage.goto(`http://127.0.0.1:${port}/`);
-        await immediateRestorePage.waitForURL(`**/bookmarks/10000000-0000-4000-8000-000000000003`);
         await immediateRestorePage.getByRole('heading', { level: 1, name: 'Articles' }).waitFor();
         await immediateRestorePage.close();
 
         await page.goto(`http://127.0.0.1:${port}/bookmarks/10000000-0000-4000-8000-000000000001`);
         await page.getByRole('heading', { level: 1, name: 'Reading' }).waitFor();
+        await page.waitForURL(`http://127.0.0.1:${port}/`);
 
         await page.getByRole('button', { name: 'Edit', exact: true }).click();
 
@@ -230,8 +211,10 @@ const verifyLocalWorker = async (scenario) => {
         await page.getByRole('heading', { level: 1, name: 'UI Folder' }).waitFor();
         await page.getByText('This Folder is empty').waitFor();
         await assertAccessible(page, 'empty Folder');
-        await page.goBack();
-        await page.waitForURL(`**/bookmarks/10000000-0000-4000-8000-000000000001`);
+        await page
+          .locator('.breadcrumb')
+          .getByRole('button', { name: 'Reading', exact: true })
+          .click();
         await page.getByRole('heading', { level: 1, name: 'Reading' }).waitFor();
         await page.getByRole('button', { name: 'Edit UI Folder' }).click();
         await page.getByLabel('Folder name').fill('UI Folder Renamed');
@@ -534,18 +517,20 @@ const verifyLocalWorker = async (scenario) => {
           .waitFor({ state: 'detached' });
 
         await page.locator('.folder-tile button').filter({ hasText: 'Articles' }).click();
-        await page.waitForURL(`**/bookmarks/10000000-0000-4000-8000-000000000003`);
         await page.getByRole('heading', { level: 1, name: 'Articles' }).waitFor();
         await page.getByText('UI Folder Renamed', { exact: true }).waitFor();
         await page.getByRole('link', { name: /Authoritative Bookmark/ }).waitFor();
-        await page.goBack();
-        await page.waitForURL(`**/bookmarks/10000000-0000-4000-8000-000000000001`);
+        await page
+          .locator('.breadcrumb')
+          .getByRole('button', { name: 'Reading', exact: true })
+          .click();
         await page.getByRole('heading', { level: 1, name: 'Reading' }).waitFor();
-        await page.goForward();
-        await page.waitForURL(`**/bookmarks/10000000-0000-4000-8000-000000000003`);
+        await page.locator('.folder-grid button').filter({ hasText: 'Articles' }).click();
         await page.getByRole('heading', { level: 1, name: 'Articles' }).waitFor();
-        await page.goBack();
-        await page.waitForURL(`**/bookmarks/10000000-0000-4000-8000-000000000001`);
+        await page
+          .locator('.breadcrumb')
+          .getByRole('button', { name: 'Reading', exact: true })
+          .click();
         await page.getByRole('heading', { level: 1, name: 'Reading' }).waitFor();
 
         let folderConfirmation = '';
@@ -571,7 +556,6 @@ const verifyLocalWorker = async (scenario) => {
         await page.locator('.folder-grid').getByText('Articles', { exact: true }).waitFor();
 
         await page.locator('.folder-tile button').filter({ hasText: 'Articles' }).click();
-        await page.waitForURL(`**/bookmarks/10000000-0000-4000-8000-000000000003`);
         await page.getByRole('heading', { level: 1, name: 'Articles' }).waitFor();
         await page.getByRole('button', { name: 'Move Authoritative Bookmark to Trash' }).click();
         await page.getByText('Moved to Trash.').waitFor();
@@ -608,7 +592,10 @@ const verifyLocalWorker = async (scenario) => {
         await page.getByRole('button', { name: 'Empty Trash' }).click();
         await page.getByText('Trash is empty').waitFor();
         await page.getByRole('button', { name: 'Back to Bookmarks' }).click();
-        await page.goBack();
+        await page
+          .locator('.breadcrumb')
+          .getByRole('button', { name: 'Reading', exact: true })
+          .click();
         if (await page.getByRole('button', { name: 'Done' }).count()) {
           await page.getByRole('button', { name: 'Done' }).click();
         }
@@ -725,7 +712,6 @@ const verifyLocalWorker = async (scenario) => {
         await searchInput.press('Escape');
         await searchInput.blur();
         await page.locator('#folder-sidebar .root-folder').click();
-        await page.waitForURL(`**/bookmarks`);
         await page.getByRole('heading', { level: 1, name: 'Bookmarks' }).waitFor();
         await page.locator('body').press('Control+k');
         if (!(await searchInput.evaluate((element) => element === document.activeElement))) {
@@ -735,12 +721,14 @@ const verifyLocalWorker = async (scenario) => {
         await page.locator('.search-results button').filter({ hasText: 'Reading' }).waitFor();
         await searchInput.press('ArrowDown');
         await searchInput.press('Enter');
-        await page.waitForURL(`**/bookmarks/10000000-0000-4000-8000-000000000001`);
+        await page.getByRole('heading', { level: 1, name: 'Reading' }).waitFor();
+        if (new URL(page.url()).pathname !== '/') {
+          throw new Error('Navigating from search changed the Page URL.');
+        }
 
-        await page.goBack();
-        await page.waitForURL(`**/bookmarks`);
+        await page.locator('#folder-sidebar .root-folder').click();
         await page.getByRole('heading', { level: 1, name: 'Bookmarks' }).waitFor();
-        await page.goForward();
+        await page.locator('.folder-grid button').filter({ hasText: 'Reading' }).click();
         await page.getByRole('heading', { level: 1, name: 'Reading' }).waitFor();
         await page.reload();
         await page.getByRole('heading', { level: 1, name: 'Reading' }).waitFor();
@@ -894,12 +882,9 @@ const verifyLocalWorker = async (scenario) => {
         }
         await page.context().setOffline(false);
         await page.reload();
-        await page.getByRole('heading', { level: 1, name: 'Reading' }).waitFor();
+        await page.getByRole('heading', { level: 1, name: 'Bookmarks' }).waitFor();
 
-        await page.evaluate(() => history.pushState({}, '', '/bookmarks/missing-folder'));
-        await page.goBack();
-        await page.getByRole('heading', { level: 1, name: 'Reading' }).waitFor();
-        await page.goForward();
+        await page.goto(`http://127.0.0.1:${port}/bookmarks/missing-folder`);
         await page.getByRole('heading', { level: 1, name: 'Folder not found' }).waitFor();
         await assertAccessible(page, 'missing Folder');
 

@@ -158,9 +158,6 @@ const routeFolderId = (): string | undefined => {
   return path || undefined;
 };
 
-const folderLocation = (folderId: string) =>
-  folderId === SYSTEM_ROOT_FOLDER_ID ? '/bookmarks' : `/bookmarks/${folderId}`;
-
 const folderPaths = computed(() => bookmarkFolderPaths(state.value.folders));
 const folderPathFor = (folderId: string): string => folderPaths.value[folderId] ?? 'Bookmarks';
 
@@ -199,7 +196,7 @@ const navigateToFolder = async (folderId: string) => {
   drawerOpen.value = false;
   trashOpen.value = false;
   duplicatesOpen.value = false;
-  await router.push(folderLocation(folderId));
+  await stateModule.selectFolder(folderId);
 };
 
 const toggleFolder = async (folderId: string) => {
@@ -810,27 +807,11 @@ onMounted(async () => {
   const folderId = routeFolderId();
   unsubscribe = stateModule.subscribe((replacement) => {
     state.value = replacement;
-    const selectedFolderId = replacement.selectedFolder?.id;
     if (!initialized.value && replacement.status !== 'loading') {
       initialized.value = true;
-      if (!folderId && selectedFolderId && selectedFolderId !== SYSTEM_ROOT_FOLDER_ID) {
-        void router.replace(folderLocation(selectedFolderId));
-      }
-    }
-    const routedFolderId = routeFolderId() ?? SYSTEM_ROOT_FOLDER_ID;
-    const routedFolderExists =
-      routedFolderId === SYSTEM_ROOT_FOLDER_ID ||
-      replacement.folders.some((folder) => folder.id === routedFolderId);
-    if (
-      initialized.value &&
-      replacement.status === 'ready' &&
-      selectedFolderId &&
-      !routedFolderExists &&
-      routedFolderId !== selectedFolderId
-    ) {
-      void router.replace(folderLocation(selectedFolderId));
     }
   });
+  if (folderId) void router.replace('/');
   await stateModule.initialize(folderId ? { folderId } : undefined);
 });
 
@@ -838,9 +819,10 @@ watch(
   () => route.fullPath,
   async () => {
     if (!initialized.value) return;
-    const folderId = routeFolderId() ?? SYSTEM_ROOT_FOLDER_ID;
-    if (state.value.selectedFolder?.id === folderId) return;
+    const folderId = routeFolderId();
+    if (!folderId) return;
     await stateModule.selectFolder(folderId);
+    await router.replace('/');
   },
 );
 

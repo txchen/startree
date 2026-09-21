@@ -1,6 +1,27 @@
 import AxeBuilder from '@axe-core/playwright';
 
 export const verifyNavigationDuringStartupRefresh = async (page) => {
+  await page.addInitScript(() => {
+    window.__startreeLocationChanges = [];
+    for (const method of ['pushState', 'replaceState']) {
+      const original = history[method].bind(history);
+      history[method] = (...args) => {
+        const target = args[2] == null ? location.href : new URL(args[2], location.href).href;
+        if (method === 'pushState' || target !== location.href) {
+          window.__startreeLocationChanges.push(method);
+        }
+        return original(...args);
+      };
+    }
+  });
+  const assertStableLocation = async () => {
+    if (
+      new URL(page.url()).pathname !== '/' ||
+      (await page.evaluate(() => window.__startreeLocationChanges.length)) !== 0
+    ) {
+      throw new Error('Retained Folder navigation changed the URL or browser history.');
+    }
+  };
   const refresh = Promise.withResolvers();
   const intercepted = Promise.withResolvers();
   await page.route('**/api/bookmarks/snapshot', async (route) => {
@@ -11,10 +32,11 @@ export const verifyNavigationDuringStartupRefresh = async (page) => {
   try {
     await page.goto(new URL('/', page.url()).toString());
     await intercepted.promise;
-    await page.waitForURL('**/bookmarks/10000000-0000-4000-8000-000000000001');
     await page.getByRole('heading', { level: 1, name: 'Reading' }).waitFor();
+    await assertStableLocation();
     await page.locator('.folder-grid button').filter({ hasText: 'Articles' }).click();
     await page.getByRole('heading', { level: 1, name: 'Articles' }).waitFor();
+    await assertStableLocation();
     const synchronized = page.waitForResponse('**/api/bookmarks/snapshot');
     refresh.resolve();
     await synchronized;
@@ -24,8 +46,10 @@ export const verifyNavigationDuringStartupRefresh = async (page) => {
     await page.locator('.search-results a').filter({ hasText: 'Example Reference' }).waitFor();
     await page.locator('#bookmark-search-input').press('Escape');
     await page.getByRole('heading', { level: 1, name: 'Articles' }).waitFor();
+    await assertStableLocation();
     await page.reload();
     await page.getByRole('heading', { level: 1, name: 'Articles' }).waitFor();
+    await assertStableLocation();
   } finally {
     refresh.resolve();
     await page.unrouteAll({ behavior: 'wait' });

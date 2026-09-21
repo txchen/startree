@@ -17,6 +17,7 @@ Startree is a private, self-hosted bookmark workspace designed to work as a brow
 - Advisory exact-URL duplicate review with recoverable deletion through Trash
 - Trash, undo, restore, permanent deletion, and conflict-aware writes
 - Remembered Folder navigation for start-page and new-tab use
+- Stable URLs while browsing: Folder selection stays local and the root URL restores the last Folder
 - Retained IndexedDB snapshots and offline browsing through a service worker
 - Responsive and accessibility-checked UI
 

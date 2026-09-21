@@ -4,11 +4,19 @@ import BookmarksPage from '../bookmarks/BookmarksPage.vue';
 
 export const pageRoutes: RouteRecordRaw[] = [
   {
-    path: '/bookmarks/:pathMatch(.*)*',
+    path: '/',
+    alias: '/bookmarks',
     name: 'bookmarks',
     component: BookmarksPage,
     meta: { navLabel: 'Bookmarks' },
   },
 ];
 
-export const routes: RouteRecordRaw[] = [{ path: '/', redirect: '/bookmarks' }, ...pageRoutes];
+export const routes: RouteRecordRaw[] = [
+  ...pageRoutes,
+  {
+    path: '/bookmarks/:pathMatch(.*)+',
+    name: 'legacy-bookmark-folder',
+    component: BookmarksPage,
+  },
+];
