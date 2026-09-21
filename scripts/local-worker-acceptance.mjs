@@ -1,5 +1,43 @@
 import AxeBuilder from '@axe-core/playwright';
 
+export const verifyImmediateNavigationRetention = async (page) => {
+  await page.evaluate(
+    () =>
+      new Promise((resolve, reject) => {
+        const request = indexedDB.open('startree-bookmarks');
+        request.onerror = () => reject(request.error);
+        request.onsuccess = () => {
+          const database = request.result;
+          const transaction = database.transaction('settings', 'readwrite');
+          let locked = true;
+          window.__releaseNavigationStorage = () => {
+            locked = false;
+          };
+          transaction.oncomplete = () => database.close();
+          const hold = () => {
+            const read = transaction.objectStore('settings').get('navigation');
+            read.onsuccess = () => {
+              resolve();
+              if (locked) hold();
+            };
+          };
+          hold();
+        };
+      }),
+  );
+  try {
+    await page.locator('.folder-grid button').filter({ hasText: 'Reading' }).click();
+    if ((await page.getByRole('heading', { level: 1 }).textContent()) !== 'Bookmarks') {
+      throw new Error('Folder navigation was published before its IndexedDB write completed.');
+    }
+  } finally {
+    await page.evaluate(() => window.__releaseNavigationStorage());
+  }
+  await page.getByRole('heading', { level: 1, name: 'Reading' }).waitFor();
+  await page.reload();
+  await page.getByRole('heading', { level: 1, name: 'Reading' }).waitFor();
+};
+
 export const verifyNavigationDuringStartupRefresh = async (page) => {
   await page.addInitScript(() => {
     window.__startreeLocationChanges = [];

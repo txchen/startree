@@ -875,8 +875,8 @@ export const createBookmarkState = (adapters: {
         state.searchScope === 'selected-folder' &&
         (state.searchQuery.trim().length > 0 || bookmarkSearchFiltersActive(state.searchFilters));
       if (refreshScopedSearch) state.searchResults = [];
-      emit();
       await writeNavigation();
+      emit();
       if (refreshScopedSearch) {
         await search(state.searchQuery, state.searchFilters, state.searchScope);
       }

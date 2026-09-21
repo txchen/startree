@@ -93,6 +93,40 @@ const snapshot = (revision = 1): BookmarkSnapshot => ({
 });
 
 describe('Bookmark state Module Interface', () => {
+  it('retains a selected Folder before publishing it as ready for an immediate reload', async () => {
+    const storage = createMemoryBookmarkStorageAdapter();
+    const state = createBookmarkState({
+      remote: createMemoryBookmarkRemoteAdapter(snapshot()),
+      storage,
+    });
+    await state.initialize();
+    const persist = storage.writeNavigation.bind(storage);
+    let completeWrite = () => {};
+    const writePending = new Promise<void>((resolve) => {
+      completeWrite = resolve;
+    });
+    vi.spyOn(storage, 'writeNavigation').mockImplementation(async (navigation) => {
+      await writePending;
+      await persist(navigation);
+    });
+    const listener = vi.fn();
+    state.subscribe(listener);
+    const selection = state.selectFolder(folderId);
+    try {
+      expect(listener).not.toHaveBeenCalledWith(
+        expect.objectContaining({ selectedFolder: expect.objectContaining({ id: folderId }) }),
+      );
+    } finally {
+      completeWrite();
+      await selection;
+      state.dispose();
+    }
+    expect(await storage.readNavigation()).toMatchObject({ selectedFolderId: folderId });
+    expect(listener).toHaveBeenLastCalledWith(
+      expect.objectContaining({ selectedFolder: expect.objectContaining({ id: folderId }) }),
+    );
+  });
+
   it('makes a cold snapshot browsable before search indexing finishes', async () => {
     let finishIndexing = () => {};
     const indexing = new Promise<void>((resolve) => {

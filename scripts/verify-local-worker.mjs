@@ -11,6 +11,7 @@ import {
   assertAccessible,
   createAndVerifyHostileBookmark,
   createAndVerifyHostileFolder,
+  verifyImmediateNavigationRetention,
   verifyNavigationDuringStartupRefresh,
 } from './local-worker-acceptance.mjs';
 import { run } from './process.mjs';
@@ -728,10 +729,7 @@ const verifyLocalWorker = async (scenario) => {
 
         await page.locator('#folder-sidebar .root-folder').click();
         await page.getByRole('heading', { level: 1, name: 'Bookmarks' }).waitFor();
-        await page.locator('.folder-grid button').filter({ hasText: 'Reading' }).click();
-        await page.getByRole('heading', { level: 1, name: 'Reading' }).waitFor();
-        await page.reload();
-        await page.getByRole('heading', { level: 1, name: 'Reading' }).waitFor();
+        await verifyImmediateNavigationRetention(page);
 
         await page.evaluate(async () => {
           await navigator.serviceWorker.ready;
