@@ -93,6 +93,74 @@ const snapshot = (revision = 1): BookmarkSnapshot => ({
 });
 
 describe('Bookmark state Module Interface', () => {
+  it('makes a cold snapshot browsable before search indexing finishes', async () => {
+    let finishIndexing = () => {};
+    const indexing = new Promise<void>((resolve) => {
+      finishIndexing = resolve;
+    });
+    const search = createMiniSearchBookmarkAdapter();
+    const replace = vi.spyOn(search, 'replace').mockImplementation(() => indexing);
+    const state = createBookmarkState({
+      remote: createMemoryBookmarkRemoteAdapter(snapshot()),
+      storage: createMemoryBookmarkStorageAdapter(),
+      search,
+    });
+    const listener = vi.fn();
+    state.subscribe(listener);
+    const initialization = state.initialize({ folderId });
+    try {
+      await vi.waitFor(() => expect(replace).toHaveBeenCalled());
+      expect(listener).toHaveBeenLastCalledWith(expect.objectContaining({ status: 'ready' }));
+      expect(state.getState()).toMatchObject({
+        status: 'ready',
+        selectedFolder: { id: folderId },
+        directBookmarks: snapshot().bookmarks.sort((a, b) => a.rank.localeCompare(b.rank)),
+      });
+      await state.selectFolder(childAId);
+    } finally {
+      finishIndexing();
+      await initialization;
+      state.dispose();
+    }
+    expect(state.getState().selectedFolder?.id).toBe(childAId);
+  });
+
+  it('preserves navigation performed while the startup refresh is pending', async () => {
+    let finishRefresh: (snapshot: BookmarkSnapshot | null) => void = () => {};
+    const refresh = new Promise<BookmarkSnapshot | null>((resolve) => {
+      finishRefresh = resolve;
+    });
+    const state = createBookmarkState({
+      remote: { readSnapshot: () => refresh },
+      storage: createMemoryBookmarkStorageAdapter({ snapshot: snapshot() }),
+    });
+    const initialization = state.initialize({ folderId });
+    try {
+      await vi.waitFor(() => expect(state.getState().status).toBe('ready'));
+      await state.selectFolder(childAId);
+    } finally {
+      finishRefresh(snapshot(2));
+      await initialization;
+      state.dispose();
+    }
+    expect(state.getState().selectedFolder?.id).toBe(childAId);
+  });
+
+  it('resolves an explicit Folder missing from the retained snapshot after refresh', async () => {
+    const retained = snapshot();
+    retained.folders = retained.folders.filter((folder) => folder.id !== childAId);
+    const state = createBookmarkState({
+      remote: createMemoryBookmarkRemoteAdapter(snapshot(2)),
+      storage: createMemoryBookmarkStorageAdapter({ snapshot: retained }),
+    });
+    await state.initialize({ folderId: childAId });
+    expect(state.getState()).toMatchObject({
+      status: 'ready',
+      selectedFolder: { id: childAId },
+    });
+    state.dispose();
+  });
+
   it('removes a trashed Bookmark optimistically and loads Trash only while online', async () => {
     const remote = createMemoryBookmarkRemoteAdapter(snapshot());
     const bookmark = snapshot().bookmarks[1]!;

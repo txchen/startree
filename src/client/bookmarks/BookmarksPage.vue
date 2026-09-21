@@ -807,9 +807,16 @@ onMounted(async () => {
   desktopMedia.addEventListener('change', updateDesktopEditing);
   updateDesktopEditing();
   document.addEventListener('keydown', handleGlobalKeydown);
+  const folderId = routeFolderId();
   unsubscribe = stateModule.subscribe((replacement) => {
     state.value = replacement;
     const selectedFolderId = replacement.selectedFolder?.id;
+    if (!initialized.value && replacement.status !== 'loading') {
+      initialized.value = true;
+      if (!folderId && selectedFolderId && selectedFolderId !== SYSTEM_ROOT_FOLDER_ID) {
+        void router.replace(folderLocation(selectedFolderId));
+      }
+    }
     const routedFolderId = routeFolderId() ?? SYSTEM_ROOT_FOLDER_ID;
     const routedFolderExists =
       routedFolderId === SYSTEM_ROOT_FOLDER_ID ||
@@ -824,13 +831,7 @@ onMounted(async () => {
       void router.replace(folderLocation(selectedFolderId));
     }
   });
-  const folderId = routeFolderId();
   await stateModule.initialize(folderId ? { folderId } : undefined);
-  initialized.value = true;
-
-  if (!folderId && state.value.selectedFolder?.id !== SYSTEM_ROOT_FOLDER_ID) {
-    await router.replace(folderLocation(state.value.selectedFolder?.id ?? SYSTEM_ROOT_FOLDER_ID));
-  }
 });
 
 watch(

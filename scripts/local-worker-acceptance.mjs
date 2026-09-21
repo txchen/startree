@@ -1,5 +1,37 @@
 import AxeBuilder from '@axe-core/playwright';
 
+export const verifyNavigationDuringStartupRefresh = async (page) => {
+  const refresh = Promise.withResolvers();
+  const intercepted = Promise.withResolvers();
+  await page.route('**/api/bookmarks/snapshot', async (route) => {
+    intercepted.resolve();
+    await refresh.promise;
+    await route.fulfill({ status: 304 });
+  });
+  try {
+    await page.goto(new URL('/', page.url()).toString());
+    await intercepted.promise;
+    await page.waitForURL('**/bookmarks/10000000-0000-4000-8000-000000000001');
+    await page.getByRole('heading', { level: 1, name: 'Reading' }).waitFor();
+    await page.locator('.folder-grid button').filter({ hasText: 'Articles' }).click();
+    await page.getByRole('heading', { level: 1, name: 'Articles' }).waitFor();
+    const synchronized = page.waitForResponse('**/api/bookmarks/snapshot');
+    refresh.resolve();
+    await synchronized;
+    await page.unrouteAll({ behavior: 'wait' });
+    // Search is queued after indexing, so it also lets startup finish settling.
+    await page.locator('#bookmark-search-input').fill('Example Reference');
+    await page.locator('.search-results a').filter({ hasText: 'Example Reference' }).waitFor();
+    await page.locator('#bookmark-search-input').press('Escape');
+    await page.getByRole('heading', { level: 1, name: 'Articles' }).waitFor();
+    await page.reload();
+    await page.getByRole('heading', { level: 1, name: 'Articles' }).waitFor();
+  } finally {
+    refresh.resolve();
+    await page.unrouteAll({ behavior: 'wait' });
+  }
+};
+
 export const assertAccessible = async (page, state) => {
   const { violations } = await new AxeBuilder({ page }).analyze();
   if (!violations.length) return;

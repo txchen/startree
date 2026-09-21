@@ -305,12 +305,19 @@ export const createBookmarkState = (adapters: {
     fromRefresh: boolean,
     synchronizedAt: string,
   ) => {
+    const firstSnapshot = state.snapshot === null;
     const selectedWasAvailable =
       state.snapshot?.folders.some((folder) => folder.id === state.selectedFolderId) ?? false;
     await adapters.storage.writeSnapshot(snapshot, { synchronizedAt });
     state.snapshot = snapshot;
     state.lastSuccessfulSyncAt = synchronizedAt;
     state.retainedSnapshotCompatibility = 'compatible';
+    if (firstSnapshot) {
+      settleSelection(state.selectedFolderId, routeFolderId !== undefined);
+      emit();
+    } else if (state.status === 'not-found') {
+      settleSelection(state.selectedFolderId, true);
+    }
     if (
       fromRefresh &&
       selectedWasAvailable &&
@@ -829,6 +836,7 @@ export const createBookmarkState = (adapters: {
       state.unconfirmedOperations = unconfirmedOperations;
       const preferredFolderId =
         routeFolderId ?? navigation?.selectedFolderId ?? SYSTEM_ROOT_FOLDER_ID;
+      state.selectedFolderId = preferredFolderId;
       if (state.snapshot) {
         settleSelection(preferredFolderId, routeFolderId !== undefined);
         emit();
@@ -836,8 +844,7 @@ export const createBookmarkState = (adapters: {
       }
       bindLifecycle();
       await refresh();
-      if (state.snapshot) settleSelection(preferredFolderId, routeFolderId !== undefined);
-      else state.status = 'error';
+      if (!state.snapshot) state.status = 'error';
       if (state.status === 'ready') await writeNavigation();
       if (state.unconfirmedOperations.length) {
         state.writeStatus = 'unknown';

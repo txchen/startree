@@ -11,12 +11,13 @@ import {
   assertAccessible,
   createAndVerifyHostileBookmark,
   createAndVerifyHostileFolder,
+  verifyNavigationDuringStartupRefresh,
 } from './local-worker-acceptance.mjs';
 import { run } from './process.mjs';
 
 const scenarioPorts = new Map([
-  ['management', '8788'],
-  ['browsing', '8789'],
+  ['management', process.env.STARTREE_VERIFY_MANAGEMENT_PORT ?? '8788'],
+  ['browsing', process.env.STARTREE_VERIFY_BROWSING_PORT ?? '8789'],
 ]);
 
 const createPersistenceDirectory = () => {
@@ -618,6 +619,11 @@ const verifyLocalWorker = async (scenario) => {
 
       if (scenario === 'browsing') {
         await page.clock.install();
+        await page.goto(`http://127.0.0.1:${port}/bookmarks/10000000-0000-4000-8000-000000000001`);
+        await page.getByRole('heading', { level: 1, name: 'Reading' }).waitFor();
+        await page.locator('#bookmark-search-input').fill('Example Reference');
+        await page.locator('.search-results a').filter({ hasText: 'Example Reference' }).waitFor();
+        await verifyNavigationDuringStartupRefresh(page);
         await page.goto(`http://127.0.0.1:${port}/bookmarks/10000000-0000-4000-8000-000000000001`);
         await page.getByRole('heading', { level: 1, name: 'Reading' }).waitFor();
         await page.locator('body').press('n');
