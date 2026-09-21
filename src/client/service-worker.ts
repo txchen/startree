@@ -32,6 +32,27 @@ registerRoute(
   }),
 );
 
+// Notes assets are cached only after Notes is actually opened, not during shell install.
+registerRoute(
+  ({ url }) =>
+    url.origin === self.location.origin &&
+    /^\/assets\/(?:NotesPage|notes-storage)-[\w-]+\.(?:js|css)$/.test(url.pathname),
+  async ({ request }) => {
+    const cache = await caches.open(`${APPLICATION_CACHE_PREFIX}-notes-assets-v1`);
+    const retained = await cache.match(request);
+    if (retained) return retained;
+    const response = await fetch(request);
+    if (response.ok) {
+      await cache.put(request, response.clone());
+      const keys = await cache.keys();
+      await Promise.all(
+        keys.slice(0, Math.max(0, keys.length - 30)).map((key) => cache.delete(key)),
+      );
+    }
+    return response;
+  },
+);
+
 const isExtendableEvent = (event: Event): event is ExtendableEvent => 'waitUntil' in event;
 
 globalThis.addEventListener('install', (event) => {

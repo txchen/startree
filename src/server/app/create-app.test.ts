@@ -355,3 +355,52 @@ describe('platform API', () => {
     await expect(response.json()).resolves.toMatchObject({ error: { code: 'request_too_large' } });
   });
 });
+
+describe('Notes API boundary', () => {
+  const createNotesApp = (write = vi.fn(async () => null)) =>
+    createApp<typeof bindings>({
+      readBookmarkRevision: async () => 0,
+      readBookmarkSnapshot: async () => snapshot,
+      readBookmarkTrash: async () => trash,
+      executeBookmarkCommand: async () => {
+        throw new Error('unused');
+      },
+      readNotesVault: async () => null,
+      writeNotesVault: write,
+    });
+  it('does not cache encrypted Notes responses and rejects cross-origin changes', async () => {
+    const app = createNotesApp();
+    const response = await app.request('/api/notes/vault', undefined, bindings);
+    expect(response.headers.get('Cache-Control')).toBe('private, no-store');
+    expect(await response.json()).toEqual({ vault: null });
+    const foreign = await app.request(
+      'https://startree.example/api/notes/vault',
+      {
+        method: 'PUT',
+        headers: { Origin: 'https://foreign.example', 'Content-Type': 'application/json' },
+        body: '{}',
+      },
+      bindings,
+    );
+    expect(foreign.status).toBe(403);
+  });
+  it('rejects plaintext and oversized payloads before calling persistence', async () => {
+    const write = vi.fn(async () => null);
+    const app = createNotesApp(write);
+    const request = (body: string) =>
+      app.request(
+        'https://startree.example/api/notes/vault',
+        {
+          method: 'PUT',
+          headers: { Origin: 'https://startree.example', 'Content-Type': 'application/json' },
+          body,
+        },
+        bindings,
+      );
+    expect(
+      (await request(JSON.stringify({ title: 'Private title', body: 'Private body' }))).status,
+    ).toBe(400);
+    expect((await request('x'.repeat(1024 * 1024 + 1))).status).toBe(413);
+    expect(write).not.toHaveBeenCalled();
+  });
+});

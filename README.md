@@ -20,6 +20,7 @@ Startree is a private, self-hosted bookmark workspace designed to work as a brow
 - Remembered Folder navigation for start-page and new-tab use
 - Stable URLs while browsing: Folder selection stays local and the root URL restores the last Folder
 - Retained IndexedDB snapshots and offline browsing through a service worker
+- A lazy-loaded, browser-encrypted Notes Page with local search, encrypted offline drafts, recovery keys, and explicit conflict handling
 - Responsive and accessibility-checked UI
 
 ## Stack
@@ -126,3 +127,9 @@ docs/             Operations, research, and agent guidance
 ```
 
 Domain terminology lives in [CONTEXT.md](CONTEXT.md). GitHub Issues are the project tracker; repository-specific issue and triage conventions are documented under [docs/agents](docs/agents).
+
+## Private Notes
+
+Open **Notes**, choose a separate password, and save and verify the recovery key before writing. Titles and bodies are encrypted in the browser before they reach Cloudflare. Refresh, leaving Notes, or 15 minutes of inactivity locks the notebook. Unsynced encrypted drafts can be resumed from the unlock screen; resolve competing edits with **Keep both versions**. Settings includes password/recovery rotation and encrypted backup export. Import accepts encrypted backups on the unlock screen.
+
+The initial notebook limit is 500 plain-text notes and 512 KiB of serialized content. Losing both the password and recovery key loses access to the notes; an application login reset cannot decrypt them. See [Encrypted Notes design](docs/encrypted-notes-design.md) for storage, trust boundaries, and recovery behavior, and [Notes performance review](docs/notes-performance-review.md) for startup measurements.

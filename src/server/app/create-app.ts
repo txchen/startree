@@ -1,3 +1,4 @@
+import { vaultWriteSchema, type VaultRecord, type VaultWrite } from '../../shared/notes/contracts';
 import { Hono } from 'hono';
 import * as v from 'valibot';
 
@@ -19,6 +20,8 @@ import { securityHeaders } from './security';
 import type { AppEnvironment, CoreBindings } from './types';
 
 type AppServices<Bindings> = {
+  readNotesVault?(bindings: Bindings): Promise<VaultRecord | null>;
+  writeNotesVault?(command: VaultWrite, bindings: Bindings): Promise<VaultRecord | null>;
   readBookmarkRevision(bindings: Bindings): Promise<number>;
   readBookmarkSnapshot(bindings: Bindings): Promise<BookmarkSnapshot>;
   readBookmarkTrash(bindings: Bindings): Promise<BookmarkTrash>;
@@ -223,6 +226,34 @@ export const createApp = <Bindings extends CoreBindings>(services: AppServices<B
       }),
     );
     return context.json(result, result.status === 'conflict' ? 409 : 200);
+  });
+
+  app.get('/api/notes/vault', async (context) => {
+    if (!services.readNotesVault) return context.json({ error: 'unavailable' }, 503);
+    return context.json({ vault: await services.readNotesVault(context.env) });
+  });
+  app.put('/api/notes/vault', async (context) => {
+    if (context.req.header('Origin') !== new URL(context.req.url).origin)
+      return context.json({ error: 'invalid_origin' }, 403);
+    if (context.req.header('Content-Type')?.split(';')[0]?.trim() !== 'application/json')
+      return context.json({ error: 'unsupported_media_type' }, 415);
+    if (!(await context.env.MUTATION_RATE_LIMITER.limit({ key: 'owner' })).success) {
+      context.header('Retry-After', '60');
+      return context.json({ error: 'rate_limited' }, 429);
+    }
+    const body = await readBoundedCommandBody(context.req.raw);
+    if (body === null) return context.json({ error: 'request_too_large' }, 413);
+    let value: unknown;
+    try {
+      value = JSON.parse(body);
+    } catch {
+      return context.json({ error: 'invalid_vault' }, 400);
+    }
+    const command = v.safeParse(vaultWriteSchema, value);
+    if (!command.success) return context.json({ error: 'invalid_vault' }, 400);
+    if (!services.writeNotesVault) return context.json({ error: 'unavailable' }, 503);
+    const result = await services.writeNotesVault(command.output, context.env);
+    return result ? context.json({ vault: result }) : context.json({ error: 'conflict' }, 409);
   });
 
   app.notFound((context) => {

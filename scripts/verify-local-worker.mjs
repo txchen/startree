@@ -16,6 +16,7 @@ import {
   verifyPageHistory,
 } from './local-worker-acceptance.mjs';
 import { run } from './process.mjs';
+import { verifyEncryptedNotes } from './notes-acceptance.mjs';
 import { verifyRecentBookmarks } from './recent-bookmarks-acceptance.mjs';
 import { verifyPinnedBookmarks } from './pinned-bookmarks-acceptance.mjs';
 import { verifyShellUpgrade } from './verify-shell-upgrade.mjs';
@@ -23,6 +24,7 @@ import { verifyShellUpgrade } from './verify-shell-upgrade.mjs';
 const scenarioPorts = new Map([
   ['management', process.env.STARTREE_VERIFY_MANAGEMENT_PORT ?? '8788'],
   ['browsing', process.env.STARTREE_VERIFY_BROWSING_PORT ?? '8789'],
+  ['notes', process.env.STARTREE_VERIFY_NOTES_PORT ?? '8790'],
 ]);
 
 const createPersistenceDirectory = () => {
@@ -34,6 +36,7 @@ const createPersistenceDirectory = () => {
       'migrations/0001_initial_bookmark_schema.sql',
       'migrations/0002_bookmark_commands.sql',
       'migrations/0003_bookmark_pins.sql',
+      'migrations/0004_encrypted_notes.sql',
       'tests/fixtures/read-only-bookmarks.sql',
     ]
       .map((path) => readFileSync(new URL(`../${path}`, import.meta.url), 'utf8'))
@@ -151,7 +154,9 @@ const verifyLocalWorker = async (scenario) => {
     try {
       const browserContext = await browser.newContext({ viewport: { width: 1280, height: 800 } });
       const page = await browserContext.newPage();
-      if (scenario === 'management') {
+      if (scenario === 'notes') {
+        await verifyEncryptedNotes(browser, `http://127.0.0.1:${port}`);
+      } else if (scenario === 'management') {
         await page.goto(`http://127.0.0.1:${port}/bookmarks`);
         await page.getByRole('heading', { level: 1, name: 'Bookmarks' }).waitFor();
         await assertAccessible(page, 'Bookmarks Page');
@@ -943,17 +948,19 @@ if (selectedScenario) {
   await verifyLocalWorker(selectedScenario);
 } else {
   const results = await Promise.all(
-    [...scenarioPorts.keys()].map(
-      (scenario) =>
-        new Promise((resolve) => {
-          const child = spawn(process.execPath, [fileURLToPath(import.meta.url), scenario], {
-            cwd: new URL('..', import.meta.url),
-            env: process.env,
-            stdio: 'inherit',
-          });
-          child.once('exit', (code, signal) => resolve({ scenario, code, signal }));
-        }),
-    ),
+    [...scenarioPorts.keys()]
+      .filter((scenario) => scenario !== 'notes')
+      .map(
+        (scenario) =>
+          new Promise((resolve) => {
+            const child = spawn(process.execPath, [fileURLToPath(import.meta.url), scenario], {
+              cwd: new URL('..', import.meta.url),
+              env: process.env,
+              stdio: 'inherit',
+            });
+            child.once('exit', (code, signal) => resolve({ scenario, code, signal }));
+          }),
+      ),
   );
   const failures = results.filter(({ code }) => code !== 0);
   if (failures.length) {
@@ -963,6 +970,8 @@ if (selectedScenario) {
         .join(', ')}`,
     );
   }
+  // Keep cryptographic browser work out of the existing parallel browsing/management pair.
+  await verifyLocalWorker('notes');
   await verifyShellUpgrade();
   console.log('All local Worker verification scenarios passed.');
 }

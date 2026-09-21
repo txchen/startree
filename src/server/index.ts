@@ -1,3 +1,4 @@
+import { createNotesService } from './notes/notes-service';
 import { createApp } from './app/create-app';
 import { createBookmarkService } from './bookmarks/bookmark-service';
 
@@ -13,6 +14,8 @@ const readBookmarkRevision = async (bindings: Env): Promise<number> => {
 
 export default createApp<Env>({
   readBookmarkRevision,
+  readNotesVault: (bindings) => createNotesService(bindings.DB).read(),
+  writeNotesVault: (command, bindings) => createNotesService(bindings.DB).write(command),
   readBookmarkSnapshot: (bindings) => createBookmarkService(bindings.DB).getSnapshot(),
   readBookmarkTrash: (bindings) => createBookmarkService(bindings.DB).getTrash(),
   executeBookmarkCommand: (command, bindings) =>

@@ -31,7 +31,7 @@ a {
 
 .app-bar {
   display: grid;
-  grid-template-columns: 1fr auto;
+  grid-template-columns: 1fr auto 1fr;
   align-items: center;
   min-height: 46px;
   padding: 0 24px;
@@ -1351,8 +1351,8 @@ h2 {
 
 @media (max-width: 760px) {
   .app-bar {
-    grid-template-columns: 1fr auto;
-    gap: 12px;
+    grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+    gap: 8px;
     padding: 0 20px;
   }
 
@@ -1675,5 +1675,42 @@ h2 {
 
   .pinned-bookmarks a {
     max-width: 150px;
+  }
+}
+
+.page-navigation {
+  display: flex;
+  align-self: stretch;
+  align-items: stretch;
+  gap: 24px;
+  font-size: 12px;
+}
+.page-navigation a {
+  display: flex;
+  align-items: center;
+  border-bottom: 2px solid transparent;
+  color: #66725f;
+  text-decoration: none;
+}
+.page-navigation a[aria-current='page'] {
+  color: #365d49;
+  border-bottom-color: #365d49;
+}
+.page-loading {
+  padding: 28px;
+  font-size: 14px;
+  color: #53634e;
+}
+@media (max-width: 760px) {
+  .page-navigation {
+    gap: 14px;
+    font-size: 11px;
+  }
+  .app-bar {
+    padding-inline: 14px;
+  }
+  .brand {
+    gap: 5px;
+    font-size: 12px;
   }
 }

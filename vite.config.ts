@@ -13,12 +13,14 @@ export default defineConfig({
       manifest: false,
       injectManifest: {
         globPatterns: ['**/*.{html,js,css,svg,png,ico,woff2}'],
+        globIgnores: ['**/NotesPage-*', '**/notes-storage-*'],
         rollupFormat: 'iife',
       },
     }),
   ],
   build: {
     outDir: 'dist',
+    manifest: true,
     sourcemap: true,
   },
   test: {
@@ -35,7 +37,7 @@ export default defineConfig({
   run: {
     tasks: {
       'verify:local:built': {
-        command: 'node scripts/verify-local-worker.mjs',
+        command: ['node scripts/verify-notes-loading.mjs', 'node scripts/verify-local-worker.mjs'],
         dependsOn: ['build'],
         cache: false,
       },

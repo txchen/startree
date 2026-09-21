@@ -68,7 +68,7 @@ GitHub Issues remain the implementation tracker. Use this document as the starti
 
 ## 3. Encrypted Quick Notes
 
-**Status:** Planned; not implemented.
+**Status:** Implemented and locally verified; deployment is recorded in the issue. UI concept A was approved with centered navigation, compact spacing, and lazy loading. Tracked in GitHub issue #23. See [the implementation design](encrypted-notes-design.md).
 
 **Purpose:** Capture private personal notes with convenient cloud synchronization while keeping readable note content out of Cloudflare storage and ordinary backend processing.
 
