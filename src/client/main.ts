@@ -1,10 +1,10 @@
-import { createApp } from 'vue';
+import { createVaporApp, vaporInteropPlugin } from 'vue';
 
 import App from './app/App.vue';
 import { router } from './app/router';
 import './app/styles.css';
 
-createApp(App).use(router).mount('#app');
+createVaporApp(App).use(vaporInteropPlugin).use(router).mount('#app');
 
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {

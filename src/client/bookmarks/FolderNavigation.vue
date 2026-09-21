@@ -1,4 +1,4 @@
-<script setup lang="ts">
+<script setup vapor lang="ts">
 import type { BookmarkFolder } from '../../shared/bookmarks/contracts';
 import { SYSTEM_ROOT_FOLDER_ID } from '../../shared/bookmarks/contracts';
 import FolderTree from './FolderTree.vue';

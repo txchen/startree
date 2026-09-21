@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { buildPerformanceFixture } from './performance-fixture.mjs';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
+const buildDirectory = process.env.STARTREE_PERFORMANCE_DIST ?? `${root}/dist`;
 
 export const startPerformanceBrowserFixture = async (fixtureCase = 'hierarchy') => {
   const db = new DatabaseSync(':memory:');
@@ -69,7 +70,7 @@ export const startPerformanceBrowserFixture = async (fixtureCase = 'hierarchy') 
               ? 'image/svg+xml'
               : 'text/html',
       );
-      res.end(readFileSync(`${root}/dist${path}`));
+      res.end(readFileSync(`${buildDirectory}${path}`));
     } catch {
       res.writeHead(404);
       res.end();

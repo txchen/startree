@@ -1,4 +1,4 @@
-<script setup lang="ts">
+<script setup vapor lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref, shallowRef, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 
@@ -997,7 +997,10 @@ onUnmounted(() => {
         <div v-if="searchFiltersOpen" id="bookmark-search-filters" class="search-filter-panel">
           <label>
             Tag
-            <select v-model="selectedTagFacet" @change="addSearchFilter('tag', selectedTagFacet)">
+            <select
+              v-model="selectedTagFacet"
+              @change="addSearchFilter('tag', ($event.target as HTMLSelectElement).value)"
+            >
               <option value="">Choose a Tag</option>
               <option
                 v-for="facet in libraryFacets.tags"
@@ -1013,7 +1016,7 @@ onUnmounted(() => {
             Domain
             <select
               v-model="selectedDomainFacet"
-              @change="addSearchFilter('domain', selectedDomainFacet)"
+              @change="addSearchFilter('domain', ($event.target as HTMLSelectElement).value)"
             >
               <option value="">Choose a domain</option>
               <option
