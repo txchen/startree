@@ -75,7 +75,7 @@ GitHub Issues remain the implementation tracker. Use this document as the starti
 ### Agreed experience
 
 - The Owner enters a separate unlock password once, then reads, edits, and searches notes during the unlocked session.
-- Notes save automatically after browser-side encryption.
+- Notes save manually through Save or Ctrl/Cmd+S after browser-side encryption. Each changed note receives a saved version; History supports preview and restoration as a new version.
 - Refreshing or reopening the application requires unlocking again.
 - Provide manual locking and automatic locking after inactivity; choose the inactivity interval during implementation.
 - Another device can unlock synchronized notes using the same password.

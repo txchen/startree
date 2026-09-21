@@ -18,13 +18,13 @@ The unchanged `scripts/measure-startup.mjs` harness uses the production build, a
 | --------------------------------- | -----------: | -----------: |
 | Cold first Folder                 |     457.2 ms |     440.0 ms |
 | Retained first Folder             |     255.1 ms |     249.9 ms |
-| Bookmark entry, gzip              | 48,364 bytes | 49,860 bytes |
+| Bookmark entry, gzip              | 48,364 bytes | 49,864 bytes |
 | Bookmark CSS, gzip (build output) | about 4.9 KB | about 5.1 KB |
 | Eager Notes JS/CSS requests       |            0 |            0 |
 | Eager Notes API requests          |            0 |            0 |
 | Precache entries                  |            5 |            5 |
 
-The Bookmark entry increases by 1,496 gzip bytes (about 3.1%). No startup regression was observed in this sample. The new Notes screen and storage chunks are loaded only on demand, approximately 8.5 KB combined gzip for JavaScript plus 1.5 KB of Notes CSS at the measured build. No runtime dependencies were added.
+The Bookmark entry increases by 1,500 gzip bytes (about 3.1%). No startup regression was observed in this sample. The new Notes screen and storage chunks are loaded only on demand, approximately 10 KB combined gzip for JavaScript plus 1.7 KB of Notes CSS after adding manual saves and version history. No runtime dependencies were added.
 
 The same delayed-search-index diagnostic remains available in the harness. With Notes, the 1-second delayed-index run reached the first Folder at a median 424.5 ms, showing that index readiness still does not gate browsing.
 

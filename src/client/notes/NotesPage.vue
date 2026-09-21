@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
 import { createNotesSession } from './notes-session';
 
 const session = createNotesSession();
@@ -17,6 +17,34 @@ const setupOpen = ref(false);
 const settingsOpen = ref(false);
 const formBusy = ref(false);
 const shielded = ref(false);
+const historyOpen = ref(false);
+const previewRevision = ref<number>();
+const leaveOpen = ref(false);
+const leaveDialog = ref<HTMLDialogElement>();
+watch(leaveOpen, async (open) => {
+  await nextTick();
+  if (open) leaveDialog.value?.showModal();
+  else leaveDialog.value?.close();
+});
+let finishLeave: ((value: boolean) => void) | undefined;
+const preview = computed(() =>
+  current.value?.history?.find((item) => item.revision === previewRevision.value),
+);
+const save = async () => {
+  await session.flush();
+};
+const keyboard = (event: KeyboardEvent) => {
+  activity();
+  if (
+    (event.ctrlKey || event.metaKey) &&
+    event.key.toLowerCase() === 's' &&
+    state.phase === 'unlocked' &&
+    !shielded.value
+  ) {
+    event.preventDefault();
+    if (state.unsaved && !state.saving) void save();
+  }
+};
 const fileInput = ref<HTMLInputElement>();
 const current = computed(
   () => state.notes.find((note) => note.id === selectedId.value) ?? state.notes[0],
@@ -35,6 +63,9 @@ const clearSecrets = () => {
   recoveryCheck.value = '';
   recoveryKey.value = '';
   query.value = '';
+  historyOpen.value = false;
+  previewRevision.value = undefined;
+  void preview.value;
   // Replace cached computed values so locked sessions do not retain old note references.
   void current.value;
   void filtered.value;
@@ -89,6 +120,16 @@ const finishSetup = async () => {
 };
 const lock = async () => {
   if (formBusy.value) return false;
+  if (state.unsaved) {
+    if (leaveOpen.value) return false;
+    leaveOpen.value = true;
+    const proceed = await new Promise<boolean>((resolve) => {
+      finishLeave = resolve;
+    });
+    leaveOpen.value = false;
+    finishLeave = undefined;
+    if (!proceed) return false;
+  }
   formBusy.value = true;
   const success = await session.lock();
   if (success) {
@@ -100,6 +141,23 @@ const lock = async () => {
   formBusy.value = false;
   return success;
 };
+const resolveLeave = async (choice: 'save' | 'discard' | 'cancel') => {
+  if (choice === 'save') await save();
+  if (choice === 'discard') await session.discardChanges();
+  finishLeave?.(choice !== 'cancel' && !state.unsaved);
+};
+const restore = async () => {
+  if (!current.value || previewRevision.value === undefined) return;
+  await session.restore(current.value.id, previewRevision.value);
+  if (!state.unsaved && !state.error) historyOpen.value = false;
+};
+watch(
+  () => current.value?.id,
+  () => {
+    historyOpen.value = false;
+    previewRevision.value = undefined;
+  },
+);
 defineExpose({ prepareToLeave: lock });
 const add = () => {
   if (state.notes.length >= 500) {
@@ -125,9 +183,7 @@ const changed = () => {
 const remove = () => {
   if (
     !current.value ||
-    !window.confirm(
-      'Delete this note? This will also remove it from your other devices after syncing.',
-    )
+    !window.confirm('Delete this note and its version history? Click Save to commit the deletion.')
   )
     return;
   state.notes = state.notes.filter((note) => note.id !== current.value?.id);
@@ -189,7 +245,7 @@ const autoLock = async () => {
     return;
   locking = true;
   shielded.value = true;
-  await lock();
+  await session.lock();
   locking = false;
 };
 const resumeHidden = async () => {
@@ -239,6 +295,7 @@ onMounted(() => {
   }, 20_000);
 });
 onUnmounted(() => {
+  finishLeave?.(false);
   clearInterval(interval);
   clearSecrets();
   void session.dispose();
@@ -252,8 +309,9 @@ onUnmounted(() => {
 <template>
   <section
     class="notes-page"
+    :class="{ 'notes-page-unlocked': state.phase === 'unlocked' && !settingUp && !shielded }"
     @pointerdown="activity"
-    @keydown="activity"
+    @keydown="keyboard"
     @wheel.passive="activity"
     @touchmove.passive="activity"
   >
@@ -261,7 +319,19 @@ onUnmounted(() => {
       <h1>Notes <span>Private</span></h1>
       <div v-if="state.phase === 'unlocked'" class="notes-page-actions">
         <span class="notes-save-status" role="status">{{ state.status }}</span>
-        <button type="button" :disabled="formBusy" @click="lock">Lock now</button>
+        <button
+          class="notes-primary"
+          :disabled="!state.unsaved || state.saving"
+          @click="save"
+          title="Save changes (Ctrl/Cmd+S)"
+        >
+          {{ state.saving ? 'Saving…' : 'Save' }}
+        </button>
+        <button v-if="state.unsaved" :disabled="state.saving" @click="session.discardChanges()">
+          Discard changes
+        </button>
+
+        <button type="button" :disabled="formBusy || state.saving" @click="lock">Lock now</button>
         <button
           type="button"
           :aria-expanded="settingsOpen"
@@ -286,8 +356,8 @@ onUnmounted(() => {
       <form class="notes-unlock-card" @submit.prevent="resumeHidden">
         <h2>Your notes are hidden</h2>
         <p>
-          The newest changes could not be retained, so this session has not discarded them. Enter
-          your password to retry saving or export an encrypted backup.
+          You have unsaved changes. They remain in memory without creating a version. Enter your
+          password to continue editing or save them.
         </p>
         <label
           >Notes password<input
@@ -456,6 +526,22 @@ onUnmounted(() => {
           Change password & recovery key</button
         ><button @click="exportEncrypted">Export encrypted backup</button>
       </div>
+      <dialog
+        ref="leaveDialog"
+        class="notes-leave-dialog"
+        aria-labelledby="notes-leave-title"
+        @cancel.prevent="resolveLeave('cancel')"
+      >
+        <h2 id="notes-leave-title">Unsaved changes</h2>
+        <p>Save a new version before leaving?</p>
+        <button class="notes-primary" :disabled="state.saving" @click="resolveLeave('save')">
+          Save and leave
+        </button>
+        <button :disabled="state.saving" @click="resolveLeave('discard')">Discard and leave</button>
+        <button :disabled="state.saving" autofocus @click="resolveLeave('cancel')">
+          Keep editing
+        </button>
+      </dialog>
       <div class="notes-layout" :class="{ 'notes-mobile-editor': mobileEditor }">
         <aside class="notes-list" aria-label="Notes">
           <div class="notes-list-toolbar">
@@ -493,8 +579,48 @@ onUnmounted(() => {
           <template v-if="current">
             <div class="notes-editor-toolbar">
               <button class="notes-back" @click="mobileEditor = false">← Notes</button
-              ><span>Plain text</span
-              ><button class="notes-delete" @click="remove">Delete note</button>
+              ><span>Plain text</span>
+              <button
+                :disabled="!current.history?.length"
+                :aria-expanded="historyOpen"
+                @click="
+                  historyOpen = !historyOpen;
+                  previewRevision = current.history?.at(-1)?.revision;
+                "
+              >
+                History
+              </button>
+              <button class="notes-delete" @click="remove">Delete note</button>
+            </div>
+            <div v-if="historyOpen" class="notes-history">
+              <label
+                >Saved version
+                <select v-model="previewRevision">
+                  <option
+                    v-for="version in [...(current.history ?? [])].reverse()"
+                    :key="version.revision"
+                    :value="version.revision"
+                  >
+                    Version {{ version.revision }} ·
+                    {{ new Date(version.savedAt).toLocaleString() }}
+                  </option>
+                </select>
+              </label>
+              <template v-if="preview">
+                <strong>{{ preview.title || 'Untitled note' }}</strong>
+                <pre>{{ preview.body }}</pre>
+                <button
+                  :disabled="
+                    state.unsaved ||
+                    state.saving ||
+                    (preview.title === current.title && preview.body === current.body)
+                  "
+                  @click="restore"
+                >
+                  Restore as new version
+                </button>
+                <small v-if="state.unsaved">Save or discard your edits before restoring.</small>
+              </template>
             </div>
             <input
               v-model="current.title"

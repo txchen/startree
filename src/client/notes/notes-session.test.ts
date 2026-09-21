@@ -162,37 +162,140 @@ it('does not repopulate plaintext when a conflict read completes after locking',
   await f.session.dispose();
 });
 
-it('debounces typing for two seconds and bounds continuous typing at fifteen seconds', async () => {
+it('never autosaves and creates one history entry per changed manual save', async () => {
   const f = createFixture();
   await setup(f);
   const write = vi.fn(f.dependencies.write);
   f.dependencies.write = write;
+  edit(f.session, 'First title');
   vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
   try {
-    edit(f.session, 'Typing');
-    for (let second = 0; second < 14; second++) {
-      await vi.advanceTimersByTimeAsync(1_000);
-      f.session.state.notes[0]!.body += '.';
-      f.session.changed();
-      await f.session.refresh();
-      expect(write).not.toHaveBeenCalled();
-    }
-    await vi.advanceTimersByTimeAsync(999);
+    await vi.advanceTimersByTimeAsync(120_000);
+    await f.session.refresh();
     expect(write).not.toHaveBeenCalled();
-    await vi.advanceTimersByTimeAsync(1);
-    await vi.waitFor(() => expect(write).toHaveBeenCalledTimes(1));
-    await f.session.flush();
-    f.session.state.notes[0]!.body += ' paused';
-    f.session.changed();
-    await vi.advanceTimersByTimeAsync(1_999);
-    expect(write).toHaveBeenCalledTimes(1);
-    await vi.advanceTimersByTimeAsync(1);
-    await vi.waitFor(() => expect(write).toHaveBeenCalledTimes(2));
-    await f.session.flush();
-    await vi.advanceTimersByTimeAsync(20_000);
-    expect(write).toHaveBeenCalledTimes(2);
+    expect(await f.session.lock()).toBe(false);
   } finally {
     vi.useRealTimers();
-    await f.session.dispose();
   }
+  await f.session.flush();
+  const note = f.session.state.notes[0]!;
+  expect(note.history).toHaveLength(1);
+  expect(f.session.state.unsaved).toBe(false);
+  await f.session.flush();
+  expect(write).toHaveBeenCalledTimes(1);
+  note.body = 'Second version';
+  f.session.changed();
+  await f.session.flush();
+  expect(note.history).toHaveLength(2);
+  note.body = 'temporary edit';
+  f.session.changed();
+  note.body = 'Second version';
+  f.session.changed();
+  expect(f.session.state.unsaved).toBe(false);
+  await f.session.flush();
+  expect(write).toHaveBeenCalledTimes(2);
+  await f.session.restore(note.id, 1);
+  expect(note.body).toBe('Private note body');
+  expect(note.history).toHaveLength(3);
+  expect(note.history?.map((item) => item.revision)).toEqual([1, 2, 3]);
+  await f.session.lock();
+  await f.session.unlock(password, false);
+  expect(f.session.state.notes[0]?.history).toHaveLength(3);
+  const recovery = await f.session.beginSetup('a replacement password');
+  await f.session.confirmSetup(recovery!);
+  const opened = await unlockVault(f.cloud().vault, 'a replacement password');
+  expect(opened.notes[0]?.history).toHaveLength(3);
+  expect(JSON.stringify(f.cloud())).not.toContain('Second version');
+  await f.session.dispose();
+});
+
+it('retains several offline manual versions and discards only uncommitted edits', async () => {
+  const f = createFixture();
+  await setup(f);
+  f.setOffline(true);
+  edit(f.session, 'Offline history');
+  await f.session.flush();
+  f.session.state.notes[0]!.body = 'Offline second version';
+  f.session.changed();
+  await f.session.flush();
+  f.session.state.notes[0]!.body = 'Discard me';
+  f.session.changed();
+  await f.session.discardChanges();
+  expect(f.session.state.notes[0]?.body).toBe('Offline second version');
+  expect(f.session.state.notes[0]?.history).toHaveLength(2);
+  f.setOffline(false);
+  await f.session.refresh();
+  const opened = await unlockVault(f.cloud().vault, password);
+  expect(opened.notes[0]?.history).toHaveLength(2);
+  await f.session.dispose();
+});
+
+it('keeps edits made during a manual save pending until the next explicit save', async () => {
+  const f = createFixture();
+  await setup(f);
+  edit(f.session, 'During save');
+  await f.session.flush();
+  const note = f.session.state.notes[0]!;
+  note.body = 'Captured version';
+  f.session.changed();
+  const saveDraft = f.dependencies.storage.saveDraft.bind(f.dependencies.storage);
+  let release!: () => void;
+  let started!: () => void;
+  const waiting = new Promise<void>((resolve) => {
+    started = resolve;
+  });
+  f.dependencies.storage.saveDraft = async (draft) => {
+    started();
+    await new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    await saveDraft(draft);
+  };
+  const saving = f.session.flush();
+  await waiting;
+  note.body = 'Private note body';
+  f.session.changed();
+  release();
+  await saving;
+  expect(f.session.state.unsaved).toBe(true);
+  expect(note.history).toHaveLength(2);
+  expect((await unlockVault(f.cloud().vault, password)).notes[0]?.body).toBe('Captured version');
+  f.dependencies.storage.saveDraft = saveDraft;
+  await f.session.flush();
+  expect(note.history).toHaveLength(3);
+  expect(f.session.state.unsaved).toBe(false);
+  await f.session.dispose();
+});
+
+it('rejects oversized history without pruning versions or replacing the cloud copy', async () => {
+  const f = createFixture();
+  await setup(f);
+  edit(f.session, 'Large history');
+  for (let version = 1; version <= 4; version++) {
+    f.session.state.notes[0]!.body = String(version).repeat(90_000);
+    f.session.changed();
+    await f.session.flush();
+    expect(f.session.state.error).toBe('');
+  }
+  const revision = f.cloud().revision;
+  f.session.state.notes[0]!.body = '5'.repeat(90_000);
+  f.session.changed();
+  await f.session.flush();
+  expect(f.session.state.unsaved).toBe(true);
+  expect(f.session.state.error).toContain('512 KB');
+  expect(f.cloud().revision).toBe(revision);
+  expect(f.session.state.notes[0]?.history).toHaveLength(4);
+  await f.session.dispose();
+});
+
+it('exports unsaved edits without committing them or adding a history entry', async () => {
+  const f = createFixture();
+  await setup(f);
+  edit(f.session, 'Export only');
+  const revision = f.cloud().revision;
+  const backup = await f.session.encryptedExport();
+  expect((await unlockVault(backup!.vault, password)).notes[0]?.title).toBe('Export only');
+  expect(f.cloud().revision).toBe(revision);
+  expect(f.session.state.unsaved).toBe(true);
+  await f.session.dispose();
 });

@@ -29,6 +29,8 @@ export const createNotesSession = (
     conflict: false,
     busy: false,
     localSafe: true,
+    saving: false,
+    unsaved: false,
     connected: false,
   });
   let key: CryptoKey | null = null;
@@ -38,9 +40,16 @@ export const createNotesSession = (
   let editVersion = 0;
   let savedVersion = 0;
   let durableVersion = 0;
-  let dirtySince = 0;
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  let maxTimer: ReturnType<typeof setTimeout> | undefined;
+  const fingerprint = (notes: Note[]) =>
+    JSON.stringify(notes.map(({ id, title, body }) => ({ id, title, body })));
+  let savedContent = '';
+  const retainLegacyHistory = (notes: Note[]) =>
+    notes.map((note) => ({
+      ...note,
+      history: note.history ?? [
+        { revision: 1, title: note.title, body: note.body, savedAt: note.updatedAt },
+      ],
+    }));
   let pending: VaultWrite | null = null;
   let job: Promise<void> | null = null;
   let epoch = 0;
@@ -91,7 +100,9 @@ export const createNotesSession = (
       if (token !== epoch) return false;
       key = opened.key;
       vault = encrypted;
-      state.notes = opened.notes;
+      state.notes = retainLegacyHistory(opened.notes);
+      savedContent = fingerprint(state.notes);
+      state.unsaved = false;
       revision = draft?.write.expectedRevision ?? state.remote!.revision;
       draftId = draft?.id ?? crypto.randomUUID();
       pending = draft?.write ?? null;
@@ -119,43 +130,31 @@ export const createNotesSession = (
       state.busy = false;
     }
   };
-  const scheduleSave = () => {
-    if (timer === undefined)
-      timer = setTimeout(() => {
-        timer = undefined;
-        void flush(false);
-      }, 2_000);
-    if (maxTimer === undefined)
-      maxTimer = setTimeout(
-        () => {
-          maxTimer = undefined;
-          void flush(false);
-        },
-        Math.max(0, 15_000 - (Date.now() - dirtySince)),
-      );
-  };
-  const flush = async (drain = true): Promise<void> => {
-    clearTimeout(timer);
-    timer = undefined;
-    clearTimeout(maxTimer);
-    maxTimer = undefined;
+  const flush = async (): Promise<void> => {
     if (job) {
       await job;
-      if (editVersion > durableVersion && !state.error && key) {
-        if (drain) await flush();
-        else scheduleSave();
-      }
       return;
     }
     if (!key || !vault || state.phase !== 'unlocked') return;
     const token = epoch;
     const activeKey = key;
+    state.saving = true;
     job = (async () => {
       try {
         if (editVersion > durableVersion) {
           const version = editVersion;
-          const capturedAt = Date.now();
-          const notes = state.notes.map((note) => ({ ...note }));
+          const notes = state.notes.map((note) => {
+            const history = [...(note.history ?? [])];
+            const latest = history.at(-1);
+            if (!latest || latest.title !== note.title || latest.body !== note.body)
+              history.push({
+                revision: (latest?.revision ?? 0) + 1,
+                title: note.title,
+                body: note.body,
+                savedAt: new Date().toISOString(),
+              });
+            return { ...note, history };
+          });
           const encrypted = await encryptNotes(activeKey, vault!, notes);
           if (token !== epoch) return;
           const write: VaultWrite = {
@@ -168,8 +167,14 @@ export const createNotesSession = (
           vault = encrypted;
           pending = write;
           durableVersion = version;
-          dirtySince = editVersion === version ? 0 : capturedAt;
-          state.localSafe = durableVersion === editVersion;
+          savedContent = fingerprint(notes);
+          for (const note of state.notes) {
+            const saved = notes.find((item) => item.id === note.id);
+            if (saved) note.history = saved.history;
+          }
+          state.unsaved = fingerprint(state.notes) !== savedContent;
+          editVersion = version + (state.unsaved ? 1 : 0);
+          state.localSafe = !state.unsaved;
         }
         if (!pending) return;
         state.status = state.conflict ? 'Conflict · encrypted draft retained' : 'Saving…';
@@ -186,7 +191,7 @@ export const createNotesSession = (
           savedVersion = durableVersion;
           await deps.storage.saveRemote(record);
           await deps.storage.removeDraft(sentDraftId);
-          state.status = 'Saved';
+          state.status = state.unsaved ? 'Unsaved changes' : 'Saved';
           state.error = '';
         } catch (error) {
           if (token !== epoch) return;
@@ -195,7 +200,9 @@ export const createNotesSession = (
             state.status = 'Conflict · encrypted draft retained';
           } else {
             state.connected = false;
-            state.status = 'Saved on this device · sync pending';
+            state.status = state.unsaved
+              ? 'Unsaved changes · earlier save pending sync'
+              : 'Saved on this device · sync pending';
           }
         }
       } catch (error) {
@@ -208,20 +215,18 @@ export const createNotesSession = (
     })();
     await job;
     job = null;
-    if (token === epoch && editVersion > durableVersion && !state.error) {
-      if (drain) await flush();
-      else scheduleSave();
-    }
+    state.saving = false;
   };
   const changed = () => {
-    if (editVersion === durableVersion) dirtySince = Date.now();
-    editVersion++;
-    state.localSafe = false;
-    state.status = 'Waiting to save…';
+    state.unsaved = fingerprint(state.notes) !== savedContent;
+    editVersion = state.unsaved ? editVersion + 1 : durableVersion;
+    state.localSafe = !state.unsaved;
+    state.status = state.unsaved
+      ? 'Unsaved changes'
+      : pending
+        ? 'Saved on this device · sync pending'
+        : 'Saved';
     state.error = '';
-    clearTimeout(timer);
-    timer = undefined;
-    scheduleSave();
   };
   const beginSetup = async (password: string) => {
     if (state.busy) return null;
@@ -230,7 +235,6 @@ export const createNotesSession = (
     const token = epoch;
     try {
       if (state.phase === 'unlocked') {
-        await flush();
         if (!state.localSafe || pending || state.conflict)
           throw new Error('Sync or resolve your current draft before changing the password.');
       }
@@ -283,10 +287,8 @@ export const createNotesSession = (
   };
   const forget = () => {
     epoch++;
-    clearTimeout(timer);
-    timer = undefined;
-    clearTimeout(maxTimer);
-    maxTimer = undefined;
+    savedContent = '';
+    state.unsaved = false;
     key = null;
     vault = null;
     generation = null;
@@ -299,10 +301,9 @@ export const createNotesSession = (
     state.error = '';
   };
   const lock = async (): Promise<boolean> => {
-    await flush();
+    if (job) await job;
     if (!state.localSafe) {
-      state.error =
-        'The latest changes are not retained. Retry saving or export your notes before locking.';
+      state.error = 'You have unsaved changes. Save them or discard them before leaving.';
       return false;
     }
     forget();
@@ -335,7 +336,10 @@ export const createNotesSession = (
           (note) =>
             !cloudNotes.some(
               (other) =>
-                other.id === note.id && other.title === note.title && other.body === note.body,
+                other.id === note.id &&
+                other.title === note.title &&
+                other.body === note.body &&
+                JSON.stringify(other.history ?? []) === JSON.stringify(note.history ?? []),
             ),
         )
         .map((note) => ({
@@ -361,7 +365,7 @@ export const createNotesSession = (
     if (state.phase !== 'unlocked') return;
     if (editVersion > durableVersion) return;
     if (pending) {
-      await flush(false);
+      await flush();
       return;
     }
     const token = epoch;
@@ -376,7 +380,8 @@ export const createNotesSession = (
         } else {
           const notes = await decryptNotes(key, remote.vault);
           if (token !== epoch || editVersion > savedVersion) return;
-          state.notes = notes;
+          state.notes = retainLegacyHistory(notes);
+          savedContent = fingerprint(state.notes);
           state.remote = remote;
           revision = remote.revision;
           vault = remote.vault;
@@ -409,11 +414,38 @@ export const createNotesSession = (
         return false;
       }
     },
+    async restore(noteId: string, revisionNumber: number) {
+      if (state.unsaved || state.saving) {
+        state.error = 'Save or discard your changes before restoring a version.';
+        return;
+      }
+      const note = state.notes.find((item) => item.id === noteId);
+      const previous = note?.history?.find((item) => item.revision === revisionNumber);
+      if (!note || !previous) return;
+      note.title = previous.title;
+      note.body = previous.body;
+      note.updatedAt = new Date().toISOString();
+      changed();
+      await flush();
+    },
+    async discardChanges() {
+      if (!key || !vault || state.saving) return false;
+      const token = epoch;
+      const notes = await decryptNotes(key, vault);
+      if (token !== epoch) return false;
+      state.notes = retainLegacyHistory(notes);
+      savedContent = fingerprint(state.notes);
+      editVersion = durableVersion;
+      state.unsaved = false;
+      state.localSafe = true;
+      state.error = '';
+      state.status = pending ? 'Saved on this device · sync pending' : 'Saved';
+      return true;
+    },
     cancelSetup() {
       generation = null;
     },
     async encryptedExport() {
-      await flush();
       if (!state.localSafe && key && vault) {
         return {
           expectedRevision: revision,

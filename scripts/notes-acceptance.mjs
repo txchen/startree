@@ -44,7 +44,33 @@ export const verifyEncryptedNotes = async (browser, base) => {
     await page.getByRole('button', { name: 'New note', exact: true }).click();
     await page.getByRole('textbox', { name: 'Note title', exact: true }).fill(secretTitle);
     await page.getByRole('textbox', { name: 'Note content', exact: true }).fill(secretBody);
+    assert.equal(await page.getByRole('button', { name: 'Save', exact: true }).isEnabled(), true);
+    await page.getByRole('button', { name: 'Save', exact: true }).click();
     await saved(page);
+    assert.equal(await page.getByRole('button', { name: 'Save', exact: true }).isEnabled(), false);
+    await page
+      .getByRole('textbox', { name: 'Note content', exact: true })
+      .fill('A version to undo');
+    await page.getByRole('textbox', { name: 'Note content', exact: true }).press('Control+s');
+    await saved(page);
+    await page.getByRole('button', { name: 'History', exact: true }).click();
+    await page.getByLabel('Saved version').selectOption('1');
+    assert.equal(await page.locator('.notes-history pre').textContent(), secretBody);
+    await page.getByRole('button', { name: 'Restore as new version' }).click();
+    await saved(page);
+    assert.equal(await page.getByLabel('Note content', { exact: true }).inputValue(), secretBody);
+    await page.getByRole('button', { name: 'History', exact: true }).click();
+    assert.equal(await page.getByLabel('Saved version').locator('option').count(), 3);
+    await page.getByRole('button', { name: 'History', exact: true }).click();
+    await page.getByLabel('Note content', { exact: true }).fill('Unsaved navigation check');
+    await page.getByRole('link', { name: 'Bookmarks', exact: true }).click();
+    await page.getByRole('button', { name: 'Keep editing' }).click();
+    assert.equal(
+      await page.getByLabel('Note content', { exact: true }).inputValue(),
+      'Unsaved navigation check',
+    );
+    await page.getByRole('button', { name: 'Discard changes', exact: true }).click();
+    assert.equal(await page.getByLabel('Note content', { exact: true }).inputValue(), secretBody);
     if (process.env.STARTREE_CAPTURE_NOTES)
       await page.screenshot({ path: '/tmp/startree-notes-implemented-desktop.png' });
     await assertAccessible(page, 'unlocked encrypted Notes');
@@ -94,6 +120,7 @@ export const verifyEncryptedNotes = async (browser, base) => {
     await page
       .getByRole('textbox', { name: 'Note content', exact: true })
       .fill('Offline private edit');
+    await page.getByRole('button', { name: 'Save', exact: true }).click();
     await page.locator('.notes-save-status').filter({ hasText: 'sync pending' }).waitFor();
     await page.reload();
     await page.getByRole('heading', { name: 'Your notes are locked' }).waitFor();
@@ -114,10 +141,12 @@ export const verifyEncryptedNotes = async (browser, base) => {
     await page
       .getByRole('textbox', { name: 'Note content', exact: true })
       .fill('First device edit');
+    await page.getByRole('button', { name: 'Save', exact: true }).click();
     await saved(page);
     await other
       .getByRole('textbox', { name: 'Note content', exact: true })
       .fill('Second device edit');
+    await other.getByRole('button', { name: 'Save', exact: true }).click();
     await other.getByRole('button', { name: 'Keep both versions' }).waitFor();
     await other.getByRole('button', { name: 'Keep both versions' }).click();
     await saved(other);

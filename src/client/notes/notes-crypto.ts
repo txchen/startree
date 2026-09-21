@@ -7,12 +7,29 @@ import {
   type EncryptedVault,
 } from '../../shared/notes/contracts';
 
-export type Note = { id: string; title: string; body: string; updatedAt: string };
+export type NoteRevision = { revision: number; title: string; body: string; savedAt: string };
+export type Note = {
+  id: string;
+  title: string;
+  body: string;
+  updatedAt: string;
+  history?: NoteRevision[];
+};
 const noteSchema = v.strictObject({
   id: v.pipe(v.string(), v.uuid()),
   title: v.pipe(v.string(), v.maxLength(300)),
   body: v.pipe(v.string(), v.maxLength(100_000)),
   updatedAt: v.string(),
+  history: v.optional(
+    v.array(
+      v.strictObject({
+        revision: v.pipe(v.number(), v.integer(), v.minValue(1)),
+        title: v.pipe(v.string(), v.maxLength(300)),
+        body: v.pipe(v.string(), v.maxLength(100_000)),
+        savedAt: v.string(),
+      }),
+    ),
+  ),
 });
 const contentsSchema = v.strictObject({
   format: v.literal(1),
@@ -78,7 +95,7 @@ export const encryptNotes = async (
   const plaintext = encoder.encode(JSON.stringify(contents));
   if (plaintext.byteLength > NOTES_PLAINTEXT_LIMIT)
     throw new Error(
-      'Notes exceed the 512 KB limit. Shorten a note or export and remove older notes.',
+      'Notes and version history exceed the 512 KB limit. Export a backup and remove unneeded notes. Existing saved versions have not been changed.',
     );
   try {
     return { ...vault, payload: await seal(key, plaintext, vault.id, 'contents') };
