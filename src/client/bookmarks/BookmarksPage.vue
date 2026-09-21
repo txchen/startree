@@ -1,6 +1,5 @@
-<script setup lang="ts">
+<script setup vapor lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref, shallowRef, watch } from 'vue';
-import { useRoute, useRouter } from 'vue-router';
 
 import { SYSTEM_ROOT_FOLDER_ID } from '../../shared/bookmarks/contracts';
 import type {
@@ -36,8 +35,8 @@ import { createBookmarkState, type BookmarkStateView } from './bookmark-state';
 import { trapDialogFocus } from './dialog-focus';
 import FolderNavigation from './FolderNavigation.vue';
 
-const route = useRoute();
-const router = useRouter();
+const props = defineProps<{ legacyFolderId?: string }>();
+const emit = defineEmits<{ canonicalize: [] }>();
 const SIDEBAR_WIDTH_STORAGE_KEY = 'startree-folder-sidebar-width';
 const SIDEBAR_MIN_WIDTH = 180;
 const SIDEBAR_MAX_WIDTH = 420;
@@ -151,12 +150,6 @@ const selectedResultId = computed(() =>
     ? `search-result-${selectedSearchResult.value}`
     : undefined,
 );
-
-const routeFolderId = (): string | undefined => {
-  const value = route.params.pathMatch;
-  const path = Array.isArray(value) ? value.join('/') : value;
-  return path || undefined;
-};
 
 const folderPaths = computed(() => bookmarkFolderPaths(state.value.folders));
 const folderPathFor = (folderId: string): string => folderPaths.value[folderId] ?? 'Bookmarks';
@@ -804,25 +797,25 @@ onMounted(async () => {
   desktopMedia.addEventListener('change', updateDesktopEditing);
   updateDesktopEditing();
   document.addEventListener('keydown', handleGlobalKeydown);
-  const folderId = routeFolderId();
+  const folderId = props.legacyFolderId;
   unsubscribe = stateModule.subscribe((replacement) => {
     state.value = replacement;
     if (!initialized.value && replacement.status !== 'loading') {
       initialized.value = true;
     }
   });
-  if (folderId) void router.replace('/');
+  if (folderId) emit('canonicalize');
   await stateModule.initialize(folderId ? { folderId } : undefined);
 });
 
 watch(
-  () => route.fullPath,
+  () => props.legacyFolderId,
   async () => {
     if (!initialized.value) return;
-    const folderId = routeFolderId();
+    const folderId = props.legacyFolderId;
     if (!folderId) return;
     await stateModule.selectFolder(folderId);
-    await router.replace('/');
+    emit('canonicalize');
   },
 );
 
@@ -997,7 +990,10 @@ onUnmounted(() => {
         <div v-if="searchFiltersOpen" id="bookmark-search-filters" class="search-filter-panel">
           <label>
             Tag
-            <select v-model="selectedTagFacet" @change="addSearchFilter('tag', selectedTagFacet)">
+            <select
+              v-model="selectedTagFacet"
+              @change="addSearchFilter('tag', ($event.target as HTMLSelectElement).value)"
+            >
               <option value="">Choose a Tag</option>
               <option
                 v-for="facet in libraryFacets.tags"
@@ -1013,7 +1009,7 @@ onUnmounted(() => {
             Domain
             <select
               v-model="selectedDomainFacet"
-              @change="addSearchFilter('domain', selectedDomainFacet)"
+              @change="addSearchFilter('domain', ($event.target as HTMLSelectElement).value)"
             >
               <option value="">Choose a domain</option>
               <option

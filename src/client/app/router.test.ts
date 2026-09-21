@@ -1,28 +1,37 @@
 import { describe, expect, it } from 'vitest';
 
-import { pageRoutes, routes } from './routes';
+import { resolvePagePath } from './routes';
 
-describe('Page routes', () => {
-  it('opens Bookmarks at the application root without redirecting', () => {
-    expect(routes[0]).toMatchObject({ path: '/', name: 'bookmarks' });
-    expect(routes[0]).not.toHaveProperty('redirect');
-  });
+describe('Page paths', () => {
+  it.each(['/', '/bookmarks', '/bookmarks/', '/BOOKMARKS'])(
+    'opens the retained selection at %s',
+    (path) => {
+      expect(resolvePagePath(path)).toEqual({ matched: true });
+    },
+  );
 
-  it('keeps Bookmarks in the stable Page navigation', () => {
-    expect(pageRoutes).toEqual([
-      expect.objectContaining({
-        name: 'bookmarks',
-        path: '/',
-        alias: '/bookmarks',
-        meta: { navLabel: 'Bookmarks' },
-      }),
-    ]);
-  });
-
-  it('keeps old Folder links available for migration to local navigation', () => {
-    expect(routes[1]).toMatchObject({
-      path: '/bookmarks/:pathMatch(.*)+',
-      component: pageRoutes[0]?.component,
+  it('retains legacy Folder identifiers for migration to local navigation', () => {
+    expect(resolvePagePath('/bookmarks/folder-id')).toEqual({
+      matched: true,
+      folderId: 'folder-id',
     });
+    expect(resolvePagePath('/bookmarks/folder-id/')).toEqual({
+      matched: true,
+      folderId: 'folder-id',
+    });
+    expect(resolvePagePath('/bookmarks/folder%20id')).toEqual({
+      matched: true,
+      folderId: 'folder id',
+    });
+  });
+
+  it('passes malformed legacy identifiers through to the missing Folder view', () => {
+    expect(resolvePagePath('/bookmarks/%invalid')).toEqual({ matched: true, folderId: '%invalid' });
+    expect(resolvePagePath('/bookmarks/a/b')).toEqual({ matched: true, folderId: 'a/b' });
+  });
+
+  it('does not render the library for unrelated paths', () => {
+    expect(resolvePagePath('/unknown')).toEqual({ matched: false });
+    expect(resolvePagePath('/bookmarks-extra')).toEqual({ matched: false });
   });
 });

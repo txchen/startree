@@ -1,5 +1,26 @@
 import AxeBuilder from '@axe-core/playwright';
 
+export const verifyPageHistory = async (page) => {
+  await page.goto(new URL('/bookmarks', page.url()).toString());
+  await page.getByRole('heading', { level: 1, name: 'Reading', exact: true }).waitFor();
+  await page.evaluate(() => {
+    window.__historyDocument = true;
+  });
+  await page.getByRole('link', { name: 'Startree home' }).click();
+  await page.waitForURL((url) => url.pathname === '/');
+  await page.goBack();
+  await page.waitForURL((url) => url.pathname === '/bookmarks');
+  await page.goForward();
+  await page.waitForURL((url) => url.pathname === '/');
+  await page.getByRole('heading', { level: 1, name: 'Reading', exact: true }).waitFor();
+  if (!(await page.evaluate(() => window.__historyDocument))) {
+    throw new Error('Home navigation reloaded the application document.');
+  }
+  await page.goto(new URL('/unknown', page.url()).toString());
+  await page.getByRole('link', { name: 'Startree home' }).click();
+  await page.getByRole('heading', { level: 1, name: 'Reading', exact: true }).waitFor();
+};
+
 export const verifyImmediateNavigationRetention = async (page) => {
   await page.evaluate(
     () =>
