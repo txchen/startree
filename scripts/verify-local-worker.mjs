@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
@@ -15,7 +15,7 @@ import {
   verifyNavigationDuringStartupRefresh,
   verifyPageHistory,
 } from './local-worker-acceptance.mjs';
-import { run } from './process.mjs';
+import { d1Migrations, d1Query } from './cloudflare.mjs';
 import { verifyEncryptedNotes } from './notes-acceptance.mjs';
 import { verifyRecentBookmarks } from './recent-bookmarks-acceptance.mjs';
 import { verifyPinnedBookmarks } from './pinned-bookmarks-acceptance.mjs';
@@ -29,35 +29,29 @@ const scenarioPorts = new Map([
 
 const createPersistenceDirectory = () => {
   const persistenceDirectory = mkdtempSync(join(tmpdir(), 'startree-worker-'));
-  const setupFile = join(persistenceDirectory, 'setup.sql');
-  writeFileSync(
-    setupFile,
-    [
-      'migrations/0001_initial_bookmark_schema.sql',
-      'migrations/0002_bookmark_commands.sql',
-      'migrations/0003_bookmark_pins.sql',
-      'migrations/0004_encrypted_notes.sql',
-      'tests/fixtures/read-only-bookmarks.sql',
-    ]
-      .map((path) => readFileSync(new URL(`../${path}`, import.meta.url), 'utf8'))
-      .join('\n'),
-  );
-  run(
-    'npx',
-    [
-      'wrangler',
-      'd1',
-      'execute',
-      'DB',
-      '--local',
-      '--env',
-      'local',
-      '--persist-to',
-      persistenceDirectory,
-      '--file',
-      setupFile,
-    ],
-    { capture: true },
+  for (const name of [
+    'cloudflare.config.ts',
+    'cloudflare.environments.ts',
+    'wrangler.config.ts',
+    'node_modules',
+    'src',
+    'dist',
+    'package.json',
+    'package-lock.json',
+  ]) {
+    symlinkSync(
+      fileURLToPath(new URL(`../${name}`, import.meta.url)),
+      join(persistenceDirectory, name),
+    );
+  }
+  const options = {
+    locationArgs: ['--local', '--persist-to', join(persistenceDirectory, '.wrangler/state')],
+  };
+  d1Migrations('apply', 'local', options);
+  d1Query(
+    readFileSync(new URL('../tests/fixtures/read-only-bookmarks.sql', import.meta.url), 'utf8'),
+    'local',
+    options,
   );
   return persistenceDirectory;
 };
@@ -67,21 +61,11 @@ const verifyLocalWorker = async (scenario) => {
   if (!port) throw new Error(`Unknown local Worker verification scenario: ${scenario}`);
   const persistenceDirectory = createPersistenceDirectory();
   const worker = spawn(
-    fileURLToPath(new URL('../node_modules/.bin/wrangler', import.meta.url)),
-    [
-      'dev',
-      '--env',
-      'local',
-      '--local',
-      '--port',
-      port,
-      '--inspector-port',
-      String(Number(port) + 447),
-      '--persist-to',
-      persistenceDirectory,
-    ],
+    fileURLToPath(new URL('../node_modules/.bin/cf', import.meta.url)),
+    ['dev', '--mode', 'local'],
     {
-      cwd: new URL('..', import.meta.url),
+      cwd: persistenceDirectory,
+      env: { ...process.env, STARTREE_DEV_PORT: port },
       stdio: ['ignore', 'pipe', 'pipe'],
     },
   );
@@ -92,7 +76,7 @@ const verifyLocalWorker = async (scenario) => {
 
   try {
     let apiResponse;
-    for (let attempt = 0; attempt < 40; attempt += 1) {
+    for (let attempt = 0; attempt < 120; attempt += 1) {
       try {
         apiResponse = await fetch(`http://127.0.0.1:${port}/api/v1/platform`);
         break;

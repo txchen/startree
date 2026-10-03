@@ -119,7 +119,7 @@ export const buildPerformanceFixture = (fixtureCase) => {
     }
   }
 
-  const sql = [
+  const statements = [
     'PRAGMA foreign_keys = ON;',
     'BEGIN TRANSACTION;',
     ...reset,
@@ -136,9 +136,13 @@ export const buildPerformanceFixture = (fixtureCase) => {
     ),
     ...valuesInChunks('bookmark_tags', ['bookmark_id', 'display_value', 'lowercase_key'], tags),
     'COMMIT;',
-  ].join('\n');
+  ];
+  const sql = statements.join('\n');
 
   return {
+    statements: statements.filter(
+      (statement) => !['BEGIN TRANSACTION;', 'COMMIT;'].includes(statement),
+    ),
     manifest: {
       case: fixtureCase,
       bookmarks: bookmarkCount,

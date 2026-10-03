@@ -1,15 +1,17 @@
-import { readFileSync } from 'node:fs';
-import { parse } from 'jsonc-parser';
-
-const config = parse(readFileSync(new URL('../wrangler.jsonc', import.meta.url), 'utf8'));
-const preview = config.env.preview;
-const production = config.env.production;
-const local = config.env.local;
-
-const databaseName = (environment) =>
-  environment.d1_databases.find(({ binding }) => binding === 'DB')?.database_name;
-const identities = [local, preview, production].map((environment) => ({
-  database: databaseName(environment),
+import configuration from '../cloudflare.config.ts';
+import { environments, getEnvironment } from '../cloudflare.environments.ts';
+const { local, preview, production } = Object.fromEntries(
+  await Promise.all(
+    Object.keys(environments).map(async (mode) => [
+      mode,
+      (await configuration({ mode, isPreview: false })).worker,
+    ]),
+  ),
+);
+const identities = Object.entries(environments).map(([mode, environment]) => ({
+  mode,
+  database: environment.databaseName,
+  databaseId: environment.databaseId,
   worker: environment.name,
 }));
 
@@ -39,15 +41,15 @@ if (new Set(identities.map(({ database }) => database)).size !== identities.leng
   );
 }
 
-if (preview.workers_dev !== true || preview.preview_urls !== false) {
+if (preview.workersDev !== true || preview.previewUrls !== false) {
   configurationFailure('preview_surfaces', 'Preview must use only its fixed workers.dev hostname.');
 }
 
-const productionRoute = production.routes?.find(({ pattern }) => pattern === 'startree.txchen.win');
+const productionRoute = production.domains?.includes('startree.txchen.win');
 if (
-  production.workers_dev !== false ||
-  production.preview_urls !== false ||
-  productionRoute?.custom_domain !== true
+  production.workersDev !== false ||
+  production.previewUrls !== false ||
+  productionRoute !== true
 ) {
   configurationFailure(
     'production_surfaces',
@@ -56,9 +58,26 @@ if (
 }
 
 for (const [name, environment] of Object.entries({ local, preview, production })) {
-  const rateLimit = environment.ratelimits?.find(
-    ({ name: binding }) => binding === 'MUTATION_RATE_LIMITER',
-  );
+  const expected = getEnvironment(name);
+  if (
+    environment.name !== expected.name ||
+    environment.env.DB.id !== expected.databaseId ||
+    environment.env.DB.name !== expected.databaseName
+  ) {
+    configurationFailure(
+      'resource_bindings',
+      `${name} must use its pinned Worker and database identities.`,
+    );
+  }
+  if (
+    environment.assets?.runWorkerFirst !== true ||
+    environment.assets?.notFoundHandling !== 'single-page-application'
+  ) {
+    configurationFailure('asset_routing', `${name} must preserve Worker-first SPA routing.`);
+  }
+  const rateLimit = environment.env.MUTATION_RATE_LIMITER;
+  if (rateLimit.namespace !== expected.namespace)
+    configurationFailure('rate_limit_isolation', `${name} must use its own rate-limit namespace.`);
   if (rateLimit?.simple?.limit !== 120 || rateLimit.simple.period !== 60) {
     configurationFailure(
       'mutation_rate_limit',
@@ -68,3 +87,15 @@ for (const [name, environment] of Object.entries({ local, preview, production })
 }
 
 console.log('Environment isolation verified:', identities);
+
+if (new Set(identities.map((item) => item.databaseId)).size !== 3)
+  throw new Error('Database IDs must be isolated.');
+for (const mode of [undefined, '', 'development', 'staging']) {
+  let rejected = false;
+  try {
+    getEnvironment(mode);
+  } catch {
+    rejected = true;
+  }
+  if (!rejected) throw new Error('Unknown modes must fail closed.');
+}

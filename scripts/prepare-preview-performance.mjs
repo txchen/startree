@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { loadAndVerifyPerformanceFixture } from './performance-fixture-d1.mjs';
-import { run } from './process.mjs';
+import { d1Migrations } from './cloudflare.mjs';
 
 const fixtureCase = process.argv[2];
 if (!['hierarchy', 'concentration', 'maximum-fields'].includes(fixtureCase)) {
@@ -15,11 +15,10 @@ if (process.env.STARTREE_CONFIRM_PREVIEW_RESET !== 'synthetic-preview-only') {
   );
 }
 
-const profile = process.env.WRANGLER_PROFILE?.trim();
-const wrangler = (...args) => ['wrangler', ...args, ...(profile ? ['--profile', profile] : [])];
+const profile = process.env.CF_PROFILE?.trim();
 const directory = mkdtempSync(join(tmpdir(), 'startree-preview-performance-'));
 
-run('npx', wrangler('d1', 'migrations', 'apply', 'DB', '--remote', '--env', 'preview'));
+d1Migrations('apply', 'preview', { profile });
 const manifest = loadAndVerifyPerformanceFixture({
   fixtureCase,
   directory,

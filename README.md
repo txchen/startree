@@ -39,9 +39,9 @@ The built Vue application and Hono API are served by one Worker. D1 is authorita
 
 ## Requirements
 
-- Node.js 22.12 or newer
+- Node.js 22.18 or newer
 - npm 11.5.2 or a compatible npm 11 release
-- Wrangler 4.x, installed through this repository's development dependencies
+- Cloudflare CLI (`cf`) and its Wrangler build/dev adapter, pinned in development dependencies
 - Chromium for the complete browser acceptance suite
 
 ## Local development
@@ -96,8 +96,8 @@ Startree has isolated `local`, `preview`, and `production` Workers and D1 databa
 The only supported deployment entry points are explicit:
 
 ```sh
-WRANGLER_PROFILE=txchendev npm run deploy:preview
-WRANGLER_PROFILE=txchendev npm run deploy:production
+CF_PROFILE=txchendev npm run deploy:preview
+CF_PROFILE=txchendev npm run deploy:production
 ```
 
 Both commands rerun complete verification, validate expand/contract migration safety, apply pending migrations, and deploy the selected environment. Production additionally requires a clean commit already present on `origin/master`.
@@ -133,3 +133,7 @@ Domain terminology lives in [CONTEXT.md](CONTEXT.md). GitHub Issues are the proj
 Open **Notes**, choose a separate password, and save and verify the recovery key before writing. Titles, bodies, and saved version history are encrypted in the browser before they reach Cloudflare. Click **Save** or press **Ctrl/Cmd+S** to commit changes; the button becomes enabled after edits. **History** previews older versions and restores them as a new version. Leaving with unsaved edits prompts to save, discard, or keep editing. Refresh, leaving Notes, or 15 minutes of inactivity locks the notebook. Unsynced encrypted drafts can be resumed from the unlock screen; resolve competing edits with **Keep both versions**. Settings includes password/recovery rotation and encrypted backup export. Import accepts encrypted backups on the unlock screen.
 
 The initial notebook limit is 500 plain-text notes and 512 KiB of serialized content including history; reaching the limit blocks the new save without pruning earlier versions. Losing both the password and recovery key loses access to the notes; an application login reset cannot decrypt them. See [Encrypted Notes design](docs/encrypted-notes-design.md) for storage, trust boundaries, and recovery behavior, and [Notes performance review](docs/notes-performance-review.md) for startup measurements.
+
+## Cloudflare CLI
+
+Cloudflare configuration lives in `cloudflare.config.ts`, with explicit `local`, `preview`, and `production` modes and pinned D1 identities in `cloudflare.environments.ts`. The project pins `cf` beta to the version recorded in `package.json`. Release scripts use `cf deploy`, including a dry run before remote migrations. `wrangler.config.ts` contains only the build/dev adapter settings required by this cf beta; Wrangler is not the deployment entry point. Frontend bundling remains in Vite.

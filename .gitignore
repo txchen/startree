@@ -5,3 +5,4 @@ dist/
 *.log
 *.storage-state.json
 .DS_Store
+.cloudflare/

@@ -4,7 +4,7 @@ Startree has local, preview, and production environments. Preview uses the `star
 
 ## Access prerequisite
 
-Before the first remote release, configure Cloudflare Access to protect the entire `startree-preview.<account-subdomain>.workers.dev` application and the entire `startree.txchen.win` application. Policies must include every path, including `/api/*`, and allow only the Owner. Production disables both `workers.dev` and version preview URLs in `wrangler.jsonc`; preview disables per-version preview URLs so its fixed, Access-protected hostname is the only preview surface.
+Before the first remote release, configure Cloudflare Access to protect the entire `startree-preview.<account-subdomain>.workers.dev` application and the entire `startree.txchen.win` application. Policies must include every path, including `/api/*`, and allow only the Owner. Production disables both `workers.dev` and version preview URLs in `cloudflare.config.ts`; preview disables per-version preview URLs so its fixed, Access-protected hostname is the only preview surface.
 
 Verify both Access applications and their policies in Zero Trust before every first deployment or hostname change. Do not deploy an environment when its whole-application Access policy is absent.
 
@@ -22,18 +22,11 @@ vp run db:migrate:local
 vp run dev:worker
 ```
 
-Wrangler serves the built Vue client and Hono API together. Use `vp dev` when only client hot-module replacement is needed. Run the complete local acceptance suite with `vp run verify`.
+`cf dev --mode local` serves the built Vue client and Hono API together. Use `vp dev` when only client hot-module replacement is needed. Run the complete local acceptance suite with `vp run verify`.
 
 ## Remote database provisioning
 
-Create the two remote D1 databases once, using the `wnam` location hint, while authenticated as the Owner:
-
-```sh
-wrangler d1 create startree-preview --location wnam
-wrangler d1 create startree-production --location wnam
-```
-
-If Wrangler does not resolve a binding by `database_name`, copy the returned database UUID into the matching environment's `database_id` in `wrangler.jsonc`. Never reuse either database in another environment.
+Both remote databases already exist. `cloudflare.environments.ts` pins their existing UUIDs; migration must reuse them rather than provision replacements. Preview and production names and UUIDs must remain distinct. `cf d1 migrations` takes a database UUID and `--dir ./migrations`, and preserves the existing `d1_migrations` history.
 
 ## Deployment
 
@@ -44,30 +37,30 @@ vp run deploy:preview
 vp run deploy:production
 ```
 
-Select a non-default Wrangler authentication profile without changing the active profile:
+Select a non-default Cloudflare CLI authentication profile without changing the active profile:
 
 ```sh
-WRANGLER_PROFILE=txchendev vp run deploy:preview
+CF_PROFILE=txchendev vp run deploy:preview
 ```
 
-Both repeat the complete local verification, list that environment's pending remote D1 migrations, require every migration to carry the reviewed `startree: expand-contract-compatible` declaration, apply migrations, and strictly deploy that environment. Production additionally requires a clean working tree and a current commit already present on `origin/master`. The command prints the target and active Worker version ID. There is no default deployment command.
+Both repeat the complete local verification, run a non-uploading `cf deploy --dry-run`, list that environment's pending remote D1 migrations, require every migration to carry the reviewed `startree: expand-contract-compatible` declaration, apply migrations, and deploy that environment using `cf deploy`. Production additionally requires a clean working tree and a current commit already present on `origin/master`. The command prints the target and active Worker version ID. There is no default deployment command.
 
 Expand/contract is mandatory: first add nullable or independently usable schema, deploy code that tolerates both shapes, backfill separately when required, and remove the old shape only after the immediately previous Worker no longer depends on it. Never combine a destructive contract step with the release that first introduces its replacement. This keeps the previous Worker usable when migration succeeds but upload fails.
 
 Compatible service-worker releases activate without waiting for all existing tabs to close. Open documents retain their current UI and drafts; subsequent navigation uses the updated shell. Bookmark snapshots missing pin metadata are reloaded from the server even when their revision matches, because an older tab can strip fields from shared IndexedDB data. Local release verification includes an upgrade from an already installed cache-first shell with an older tab kept open.
 
-`deploy:production` targets `https://startree.txchen.win` and must never be run merely to test configuration. Use `wrangler deploy --dry-run --env production --profile txchendev` for a non-deploying configuration check. A failed upload leaves the prior deployment active; record the command output, inspect deployment status, and do not rerun migrations independently.
+`deploy:production` targets `https://startree.txchen.win` and must never be run merely to test configuration. Use `npx cf deploy --dry-run --mode production --profile txchendev` for a non-deploying configuration check. A failed upload leaves the prior deployment active; record the command output, inspect deployment status, and do not rerun migrations independently.
 
 ## Representative preview measurement
 
 Preview holds synthetic data only. Preparing a case replaces all preview Bookmark data and never targets production:
 
 ```sh
-STARTREE_CONFIRM_PREVIEW_RESET=synthetic-preview-only WRANGLER_PROFILE=txchendev \
+STARTREE_CONFIRM_PREVIEW_RESET=synthetic-preview-only CF_PROFILE=txchendev \
   vp run performance:prepare:preview -- hierarchy
-STARTREE_CONFIRM_PREVIEW_RESET=synthetic-preview-only WRANGLER_PROFILE=txchendev \
+STARTREE_CONFIRM_PREVIEW_RESET=synthetic-preview-only CF_PROFILE=txchendev \
   vp run performance:prepare:preview -- concentration
-STARTREE_CONFIRM_PREVIEW_RESET=synthetic-preview-only WRANGLER_PROFILE=txchendev \
+STARTREE_CONFIRM_PREVIEW_RESET=synthetic-preview-only CF_PROFILE=txchendev \
   vp run performance:prepare:preview -- maximum-fields
 ```
 
@@ -103,27 +96,23 @@ Record browser names and versions plus an explicit pass or the remaining defects
 
 ## Inspection and rollback
 
-Use Workers Logs for redacted structured runtime errors:
-
-```sh
-wrangler tail --env preview
-wrangler tail --env production
-```
+Use the Cloudflare dashboard's Workers Logs view for redacted structured runtime errors.
 
 Select `--profile txchendev` when the profile is not active. Logs may contain only safe event names, mutation type/outcome/conflict classification, request and operation IDs, sanitized exception types/cause frames, and Git commit SHA. Stop investigation if output contains an Access header, cookie, request body, SQL, Bookmark URL/title, Folder name, Tag, or Note; treat that as a privacy incident.
 
 Inspect D1 without including Owner content in shared diagnostics:
 
 ```sh
-wrangler d1 migrations list DB --remote --env preview
-wrangler d1 execute DB --remote --env preview --command "SELECT revision FROM bookmark_domain_state"
+npx cf d1 migrations list 6058ca3d-0168-4214-888c-88e597375377 --mode preview --dir ./migrations
+npx cf d1 query 6058ca3d-0168-4214-888c-88e597375377 --mode preview --sql "SELECT revision FROM bookmark_domain_state"
 ```
 
 For a code regression, list versions and roll back the affected Worker by version ID. A Worker rollback does not reverse D1 schema or data:
 
 ```sh
-wrangler versions list --env production
-wrangler rollback --env production <VERSION_ID>
+npx cf workers versions list --mode production --worker startree
+npx cf workers deployments create --mode production --worker startree \
+  --strategy percentage --versions '[{"version_id":"<VERSION_ID>","percentage":100}]'
 ```
 
 There are three incident paths:
@@ -133,3 +122,11 @@ There are three incident paths:
 3. A suspected D1 migration or data problem stops further deployments and writes pending manual inspection. Never attempt an automatic reverse migration.
 
 For authentication expiry, allow the failed online request to enter Cloudflare Access login normally. Confirm retained cached Bookmarks remain visible while refresh reports failure, then authenticate and retry. Never clear the usable snapshot as an expiry workaround.
+
+## cf beta migration details
+
+The project pins `cf@1.0.0-beta.12` and its supported Wrangler build/dev adapter. All deployment, database, and type-generation entry points use `cf`. Resource settings are defined only in `cloudflare.config.ts`; the old JSONC configuration has been removed. `CF_PROFILE` selects a local authentication profile. Missing or unknown modes fail closed. Release scripts pass the Git SHA through `STARTREE_RELEASE_REVISION` for `APP_VERSION` and tag the deployed version.
+
+The beta can leave a Miniflare file watcher alive after a local D1 command completes. `scripts/cf-local.mjs` awaits the official CLI entry point, flushes output, and exits with its status; it is restricted to finite local D1 commands and is not used for deployment or dev servers. This beta implements local D1 reads through `cf d1 raw`; `scripts/cloudflare.mjs` converts its column/row response into objects. Local development uses the adapter's `.wrangler/state` persistence directory, so `db:migrate:local` explicitly targets it. Browser acceptance creates a temporary project with source/build symlinks and its own `.wrangler/state`, because the beta's dev adapter does not forward `--persist-to`. Ports come from `STARTREE_DEV_PORT` in the adapter config. No test contacts remote D1. Synthetic performance fixtures use bounded batches through the API; a failed import may leave preview partially populated and should be rerun, never used against production.
+
+Run `npm run types` to regenerate `worker-configuration.d.ts` from `cf workers types`. `.cloudflare/` is generated output and is not committed. Native configuration and inferred Worker bindings are covered by server type checking. Node.js 22.18 or later is required for TypeScript configuration loading.

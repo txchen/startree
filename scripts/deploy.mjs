@@ -1,3 +1,4 @@
+import { getEnvironment } from '../cloudflare.environments.ts';
 import { run } from './process.mjs';
 import { releaseIdentity, releaseSteps } from './release-safety.mjs';
 
@@ -7,12 +8,9 @@ if (environment !== 'preview' && environment !== 'production') {
 }
 
 const revision = run('git', ['rev-parse', 'HEAD'], { capture: true });
-const wranglerProfile = process.env.WRANGLER_PROFILE?.trim();
-const wrangler = (...args) => [
-  'wrangler',
-  ...args,
-  ...(wranglerProfile ? ['--profile', wranglerProfile] : []),
-];
+const profile = process.env.CF_PROFILE?.trim();
+const profileArgs = profile ? ['--profile', profile] : [];
+process.env.STARTREE_RELEASE_REVISION = revision;
 
 if (environment === 'production') {
   const workingTree = run('git', ['status', '--porcelain'], { capture: true });
@@ -25,11 +23,25 @@ if (environment === 'production') {
 }
 
 for (const [command, args] of releaseSteps(environment, revision)) {
-  run(command, command === 'npx' && args[0] === 'wrangler' ? wrangler(...args.slice(1)) : args);
+  run(command, args[0] === 'cf' ? [...args, ...profileArgs] : args);
 }
 
 const deployment = JSON.parse(
-  run('npx', wrangler('deployments', 'status', '--env', environment, '--json'), { capture: true }),
+  run(
+    'npx',
+    [
+      'cf',
+      'workers',
+      'deployments',
+      'list',
+      '--worker',
+      getEnvironment(environment).name,
+      '--mode',
+      environment,
+      ...profileArgs,
+    ],
+    { capture: true },
+  ),
 );
 const { target, versionId } = releaseIdentity(environment, deployment);
 

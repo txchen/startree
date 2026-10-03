@@ -12,5 +12,12 @@
     "allowImportingTsExtensions": true,
     "noEmit": true
   },
-  "include": ["src/server/**/*.ts", "src/shared/**/*.ts", "worker-configuration.d.ts"]
+  "include": [
+    "src/server/**/*.ts",
+    "src/shared/**/*.ts",
+    "worker-configuration.d.ts",
+    "cloudflare.config.ts",
+    "cloudflare.environments.ts",
+    "wrangler.config.ts"
+  ]
 }

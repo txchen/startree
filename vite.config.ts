@@ -28,10 +28,10 @@ export default defineConfig({
     environment: 'node',
   },
   lint: {
-    ignorePatterns: ['dist/**', 'worker-configuration.d.ts'],
+    ignorePatterns: ['dist/**', '.cloudflare/**', 'worker-configuration.d.ts'],
   },
   fmt: {
-    ignorePatterns: ['dist/**', 'worker-configuration.d.ts', 'package-lock.json'],
+    ignorePatterns: ['dist/**', '.cloudflare/**', 'worker-configuration.d.ts', 'package-lock.json'],
     singleQuote: true,
   },
   run: {
