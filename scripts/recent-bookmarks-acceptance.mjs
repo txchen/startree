@@ -9,13 +9,36 @@ export const verifyRecentBookmarks = async (page) => {
   const first = await cards.nth(0).getAttribute('data-bookmark-id');
   const second = await cards.nth(1).getAttribute('data-bookmark-id');
   const waitForOrder = async (target, ids) => {
-    await target.waitForFunction(
-      (expected) =>
-        JSON.stringify(
-          [...document.querySelectorAll('[data-recent-id]')].map((item) => item.dataset.recentId),
-        ) === JSON.stringify(expected),
-      ids,
-    );
+    try {
+      await target.waitForFunction(
+        (expected) =>
+          JSON.stringify(
+            [...document.querySelectorAll('[data-recent-id]')].map((item) => item.dataset.recentId),
+          ) === JSON.stringify(expected),
+        ids,
+        { timeout: 10_000 },
+      );
+    } catch (error) {
+      const actual = await target.evaluate(async () => {
+        const stored = await new Promise((resolve) => {
+          const open = indexedDB.open('startree-bookmarks');
+          open.onsuccess = () => {
+            const get = open.result.transaction('settings').objectStore('settings').get('recentBookmarksV1');
+            get.onsuccess = () => resolve(get.result?.value ?? null);
+            get.onerror = () => resolve('read-error');
+          };
+          open.onerror = () => resolve('open-error');
+        });
+        return {
+          rendered: [...document.querySelectorAll('[data-recent-id]')].map((item) => item.dataset.recentId),
+          stored,
+          navigation: performance.getEntriesByType('navigation')[0]?.type,
+          url: location.href,
+          ua: navigator.userAgent,
+        };
+      });
+      throw new Error(`Recent order mismatch: expected ${JSON.stringify(ids)}, got ${JSON.stringify(actual)}`, { cause: error });
+    }
     if (ids.length) {
       const disclosure = target.locator('.recent-disclosure');
       if (!(await disclosure.evaluate((element) => element.open))) {
