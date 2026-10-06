@@ -63,6 +63,17 @@ type SearchDocument = BookmarkSearchResult & {
   scopeFolderIds: readonly string[];
 };
 
+// Scheme, "www", and query parameters add index terms that rarely help find a Bookmark.
+// Fragments stay because hash-routed applications keep their route there.
+const searchableUrl = (url: string): string => {
+  try {
+    const parsed = new URL(url);
+    return `${parsed.hostname.replace(/^www\./, '')}${parsed.pathname}${parsed.hash}`;
+  } catch {
+    return url;
+  }
+};
+
 const createIndex = () =>
   new MiniSearch<SearchDocument>({
     // Keep result payloads in one array instead of duplicating them in storeFields.
@@ -75,7 +86,7 @@ const createIndex = () =>
         case 'title':
           return document.title;
         case 'urlText':
-          return document.kind === 'bookmark' ? document.url : '';
+          return document.kind === 'bookmark' ? searchableUrl(document.url) : '';
         case 'tagText':
           return document.kind === 'bookmark' ? document.tags.join(' ') : '';
         case 'noteText':

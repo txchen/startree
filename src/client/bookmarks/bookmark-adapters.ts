@@ -151,6 +151,12 @@ type UnconfirmedOperationRecord = {
 };
 
 const BOOKMARK_DATABASE_VERSION = 3;
+// Refreshes that confirm the retained revision update this small record instead of rewriting the snapshot.
+const SNAPSHOT_SYNCHRONIZATION_SETTING = 'activeSnapshotSynchronization';
+const snapshotSynchronizationSchema = v.object({
+  snapshotKey: v.string(),
+  synchronizedAt: v.string(),
+});
 const snapshotKey = (snapshot: BookmarkSnapshot): string =>
   `${snapshot.wireFormatVersion}:${snapshot.revision}`;
 
@@ -258,13 +264,18 @@ export const createIndexedDbBookmarkAdapter = (
       return ids;
     },
     async readSnapshot() {
-      const key = await readSetting('activeSnapshotKey');
-      if (typeof key !== 'string') return { status: 'empty' };
       const database = await databasePromise;
-      const transaction = database.transaction('completeSnapshots', 'readonly');
-      const record = await indexedDbRequest<CompleteSnapshotRecord | undefined>(
-        transaction.objectStore('completeSnapshots').get(key),
-      );
+      const transaction = database.transaction(['settings', 'completeSnapshots'], 'readonly');
+      const settings = transaction.objectStore('settings');
+      const key = (await indexedDbRequest<Setting | undefined>(settings.get('activeSnapshotKey')))
+        ?.value;
+      if (typeof key !== 'string') return { status: 'empty' };
+      const [record, synchronization] = await Promise.all([
+        indexedDbRequest<CompleteSnapshotRecord | undefined>(
+          transaction.objectStore('completeSnapshots').get(key),
+        ),
+        indexedDbRequest<Setting | undefined>(settings.get(SNAPSHOT_SYNCHRONIZATION_SETTING)),
+      ]);
       await transactionComplete(transaction);
       if (!record) return { status: 'empty' };
       if (record.wireFormatVersion !== BOOKMARK_SNAPSHOT_WIRE_FORMAT_VERSION) {
@@ -275,33 +286,49 @@ export const createIndexedDbBookmarkAdapter = (
         } satisfies StoredBookmarkSnapshot;
       }
       const result = v.safeParse(bookmarkSnapshotSchema, record.snapshot);
+      const synchronized = v.safeParse(snapshotSynchronizationSchema, synchronization?.value);
       return result.success
         ? ({
             status: 'compatible',
             snapshot: result.output,
-            synchronizedAt: record.synchronizedAt ?? null,
+            synchronizedAt:
+              synchronized.success && synchronized.output.snapshotKey === key
+                ? synchronized.output.synchronizedAt
+                : (record.synchronizedAt ?? null),
           } satisfies StoredBookmarkSnapshot)
         : ({
             status: 'incompatible',
             wireFormatVersion: record.wireFormatVersion,
           } satisfies StoredBookmarkSnapshot);
     },
+    // Callers pass already validated snapshots; re-parsing would copy the whole library.
     async writeSnapshot(snapshot: BookmarkSnapshot, metadata: { synchronizedAt: string }) {
-      const validated = v.parse(bookmarkSnapshotSchema, snapshot);
       const database = await databasePromise;
       const transaction = database.transaction(['completeSnapshots', 'settings'], 'readwrite');
-      const key = snapshotKey(validated);
+      const key = snapshotKey(snapshot);
       transaction.objectStore('completeSnapshots').put({
         key,
-        wireFormatVersion: validated.wireFormatVersion,
-        revision: validated.revision,
-        snapshot: validated,
+        wireFormatVersion: snapshot.wireFormatVersion,
+        revision: snapshot.revision,
+        snapshot,
         synchronizedAt: metadata.synchronizedAt,
       } satisfies CompleteSnapshotRecord);
-      transaction
-        .objectStore('settings')
-        .put({ key: 'activeSnapshotKey', value: key } satisfies Setting);
+      const settings = transaction.objectStore('settings');
+      settings.put({ key: 'activeSnapshotKey', value: key } satisfies Setting);
+      settings.put({
+        key: SNAPSHOT_SYNCHRONIZATION_SETTING,
+        value: { snapshotKey: key, synchronizedAt: metadata.synchronizedAt },
+      } satisfies Setting);
       hooks.beforeSnapshotCommit?.(transaction);
+      await transactionComplete(transaction);
+    },
+    async writeSnapshotSynchronization(snapshot: BookmarkSnapshot, synchronizedAt: string) {
+      const database = await databasePromise;
+      const transaction = database.transaction('settings', 'readwrite');
+      transaction.objectStore('settings').put({
+        key: SNAPSHOT_SYNCHRONIZATION_SETTING,
+        value: { snapshotKey: snapshotKey(snapshot), synchronizedAt },
+      } satisfies Setting);
       await transactionComplete(transaction);
     },
     async readNavigation() {

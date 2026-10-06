@@ -164,6 +164,23 @@ describe('production Bookmark adapters', () => {
     });
   });
 
+  it('records a confirmed refresh time for the active snapshot only', async () => {
+    const adapter = createIndexedDbBookmarkAdapter(new IDBFactory(), 'startree-synchronized');
+    await adapter.writeSnapshot(snapshot(1), { synchronizedAt: '2026-08-18T20:00:00.000Z' });
+
+    await adapter.writeSnapshotSynchronization(snapshot(1), '2026-08-18T22:00:00.000Z');
+    await expect(adapter.readSnapshot()).resolves.toEqual({
+      status: 'compatible',
+      snapshot: snapshot(1),
+      synchronizedAt: '2026-08-18T22:00:00.000Z',
+    });
+
+    await adapter.writeSnapshotSynchronization(snapshot(9), '2026-08-18T23:00:00.000Z');
+    await expect(adapter.readSnapshot()).resolves.toMatchObject({
+      synchronizedAt: '2026-08-18T20:00:00.000Z',
+    });
+  });
+
   it('retains the prior complete snapshot when replacement is interrupted', async () => {
     const indexedDb = new IDBFactory();
     const adapter = createIndexedDbBookmarkAdapter(indexedDb, 'startree-interrupted');

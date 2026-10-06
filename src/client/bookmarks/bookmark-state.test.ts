@@ -431,6 +431,28 @@ describe('Bookmark state Module Interface', () => {
     state.dispose();
   });
 
+  it('records an unchanged refresh without rewriting the retained snapshot', async () => {
+    const storage = createMemoryBookmarkStorageAdapter({
+      snapshot: snapshot(),
+      synchronizedAt: '2026-08-18T20:00:00.000Z',
+    });
+    const writeSnapshot = vi.spyOn(storage, 'writeSnapshot');
+    const lifecycle = createMemoryBookmarkLifecycleAdapter();
+    const state = createBookmarkState({
+      remote: { readSnapshot: () => Promise.resolve(null) },
+      storage,
+      lifecycle,
+    });
+
+    await state.initialize({ folderId });
+
+    expect(writeSnapshot).not.toHaveBeenCalled();
+    const synchronizedAt = state.getState().lastSuccessfulSyncAt;
+    expect(synchronizedAt).not.toBe('2026-08-18T20:00:00.000Z');
+    await expect(storage.readSnapshot()).resolves.toMatchObject({ synchronizedAt });
+    state.dispose();
+  });
+
   it('shows syncing after two seconds and a slow state after five while retaining content', async () => {
     vi.useFakeTimers();
     const lifecycle = createMemoryBookmarkLifecycleAdapter();

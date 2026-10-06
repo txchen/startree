@@ -71,6 +71,9 @@ export const createMemoryBookmarkStorageAdapter = (initial?: {
       snapshot = structuredClone(replacement);
       synchronizedAt = metadata.synchronizedAt;
     },
+    async writeSnapshotSynchronization(_snapshot, replacement) {
+      synchronizedAt = replacement;
+    },
     async readNavigation() {
       return navigation ? structuredClone(navigation) : null;
     },

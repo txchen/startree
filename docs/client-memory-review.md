@@ -53,3 +53,17 @@ The startup and memory scripts share a synthetic fixture server. Memory output i
 Regression tests cover text search, ranking, match context, result limits, late matching filters, Folder scope, multiple Bookmarks sharing one Folder, snapshot replacement, disposal, and unreachable records. Existing browser acceptance also exercises filters, keyboard navigation, retained browsing, mutations, and offline search.
 
 Validation before release passed formatting, lint, client and server type checks, 123 unit tests, 10 script tests, the production build, and both local Worker browser scenarios. The normal production deployment entry point repeats complete verification.
+
+## Startup peak and URL indexing follow-up
+
+This follow-up measured renderer process memory as well as JavaScript heap. `scripts/measure-process-memory.mjs` reads renderer private memory from `/proc`, so it runs only on Linux. It measures a cold start and a retained start with a persistent browser profile, records the peak during the first six seconds, and waits 45 seconds before the settled sample. Chromium returns freed renderer memory only after the page has been idle for about 30 seconds, so shorter waits do not show settled memory. Set `STARTREE_PERFORMANCE_DIST` to compare two builds on one machine.
+
+With the hierarchy fixture, the renderer peaks at about 120 to 130 MB during startup and settles at about 75 to 80 MB. A blank page settles at about 32 MB. During the peak, the page heap has 28.0 MB committed for 9.5 MB used and settles at 6.9 MB committed. The search Worker heap has 30.1 MB committed for 18.5 MB used and settles at 12.6 MB committed. Most of the peak is therefore V8 heap growth during the burst of allocation from snapshot parsing and index construction, not retained data. Small allocation reductions do not change it:
+
+- When a refresh confirms the retained revision, startup no longer rewrites the complete snapshot to IndexedDB to update its synchronization time. A small settings record now stores that time. This removes about 48 ms of synchronous main-thread serialization from every retained start and every refresh when the page becomes visible again. Alternating four-run comparisons against the previous build showed no change in renderer peak memory, at 120 to 123 MB for both builds.
+- `writeSnapshot` no longer parses the snapshot again before storing it. Its callers already hold validated snapshots, and parsing copied the whole library.
+- Sending the Worker a projection with only the fields search reads showed no measurable change in peak memory, so it was not kept.
+
+The search index no longer includes the URL scheme, a leading `www.`, or query parameters. The host, path, and fragment remain searchable, and fragments stay for hash-routed applications. Result context and domain filters still use the full URL. With the hierarchy fixture, whose URLs have no query strings, Worker heap fell from 11.86 MB to 11.41 MB. In a standalone MiniSearch experiment with 10,000 synthetic URLs across 300 hosts, where 35% of URLs had tracking or ID query parameters, the index fell from 22.9 MB to 19.5 MB. Real libraries will differ. Tokens that appear only in query parameters no longer match.
+
+Two options were considered and declined. Returning only IDs from the Worker would save an estimated 1 to 2 MB for added complexity. Starting the Worker lazily would delay the first search, which is the main action on a new-tab page.

@@ -46,6 +46,7 @@ export type StoredBookmarkSnapshot =
 export type BookmarkStorageAdapter = {
   readSnapshot(): Promise<StoredBookmarkSnapshot>;
   writeSnapshot(snapshot: BookmarkSnapshot, metadata: { synchronizedAt: string }): Promise<void>;
+  writeSnapshotSynchronization(snapshot: BookmarkSnapshot, synchronizedAt: string): Promise<void>;
   readNavigation(): Promise<BookmarkNavigation | null>;
   writeNavigation(navigation: BookmarkNavigation): Promise<void>;
   clear(): Promise<void>;
@@ -384,7 +385,7 @@ export const createBookmarkState = (adapters: {
         const synchronizedAt = new Date(lifecycle.now()).toISOString();
         if (replacement) await promote(replacement, true, synchronizedAt);
         else if (state.snapshot) {
-          await adapters.storage.writeSnapshot(state.snapshot, { synchronizedAt });
+          await adapters.storage.writeSnapshotSynchronization(state.snapshot, synchronizedAt);
           state.lastSuccessfulSyncAt = synchronizedAt;
         }
         state.syncStatus = 'idle';

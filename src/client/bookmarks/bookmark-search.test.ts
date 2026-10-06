@@ -98,6 +98,26 @@ describe('Bookmark search Adapter Interface', () => {
     await expect(search.search('needle')).resolves.toHaveLength(2);
   });
 
+  it('indexes URL hosts, paths, and fragments but not schemes or query parameters', async () => {
+    const search = createMiniSearchBookmarkAdapter();
+    const base = snapshot();
+    const [bookmark] = base.bookmarks;
+    await search.replace({
+      ...base,
+      bookmarks: [
+        { ...bookmark!, url: 'https://www.tracked.example/watch?utm_source=newsletter#/inbox' },
+      ],
+      tags: [],
+    });
+
+    for (const query of ['tracked', 'watch', 'inbox']) {
+      await expect(search.search(query)).resolves.toMatchObject([{ id: bookmark!.id }]);
+    }
+    for (const query of ['https', 'www', 'newsletter']) {
+      await expect(search.search(query)).resolves.toEqual([]);
+    }
+  });
+
   it('ranks Bookmark title matches above Note-only matches', async () => {
     const search = createMiniSearchBookmarkAdapter();
     await search.replace(snapshot());
