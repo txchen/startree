@@ -6,7 +6,7 @@ Startree has local, preview, and production environments. Preview uses the `star
 
 Use a POSIX shell on Linux or macOS. On Windows, run inside WSL with Linux Node.js and npm installed there. Do not use Windows executables from WSL or Git Bash with Windows Node. Native PowerShell and Command Prompt deployment is unsupported and untested. The verification evidence is Linux-only.
 
-Fork and clone the repository. Recommended: Node.js 22 LTS, version 22.18 or later within the 22.x line, and npm 11. An existing Node.js 24 LTS installation at 24.11 or later also meets the dependency range; no downgrade is needed. See the [deployment review](agent-deployment-review.md) for tested versions and verification limits.
+Clone the repository directly. Fork only if you want to modify the source and maintain your own version. Recommended: Node.js 22 LTS, version 22.18 or later within the 22.x line, and npm 11. An existing Node.js 24 LTS installation at 24.11 or later also meets the dependency range; no downgrade is needed. See the [deployment review](agent-deployment-review.md) for tested versions and verification limits.
 
 Before authentication or provisioning, run these commands from the repository root:
 
@@ -44,7 +44,7 @@ Continue only after installation and deployment verification succeed.
 
 6. Run `npm run deploy:preview`. Verify that unauthenticated requests cannot reach the application, then test authenticated bookmark creation, reload, and search.
 
-7. Push your application commit to `origin/master` in your fork before running `npm run deploy:production`. Production requires a clean working tree and a commit already on that remote branch. Never commit `deployment.local.json`; back it up privately.
+7. Run `npm run deploy:production`. Production requires a clean working tree and a current commit already present on `origin/master`. A direct clone satisfies these Git requirements without pushing anything. If you modify the source, push your changes to `master` in your own fork and point `origin` to that fork before deploying production. Never commit `deployment.local.json`; back it up privately.
 
 Keep credentials in CLI authentication profiles, never in repository files. Database IDs are resource identifiers rather than access credentials, but can still identify your installation.
 

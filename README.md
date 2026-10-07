@@ -42,9 +42,11 @@ Use a POSIX shell on Linux or macOS. On Windows, use WSL with Linux Node.js and 
 
 Recommended: Node.js 22 LTS, version 22.18 or later within the 22.x line, and npm 11. An existing Node.js 24 LTS installation at 24.11 or later also meets the dependency range; no downgrade is needed. You also need a Cloudflare account with Workers, D1, Access, and a domain for production.
 
-1. Fork and clone this repository, then install and verify locally before authentication or provisioning. Deployment does not require a Playwright browser installation.
+1. Clone this repository, then install and verify locally before authentication or provisioning. Fork only if you want to modify the source and maintain your own version. Deployment does not require a Playwright browser installation.
 
    ```sh
+   git clone https://github.com/txchen/startree.git
+   cd startree
    node --version
    npm --version
    npm ci --include=dev --include=optional
@@ -66,7 +68,7 @@ Recommended: Node.js 22 LTS, version 22.18 or later within the 22.x line, and np
 
    If you use a named CLI authentication profile, prefix either command with `CF_PROFILE=your-profile`.
 
-Both commands run browser-free checks and apply database migrations before deployment. Production also requires a clean commit already pushed to `origin/master` in your fork. See the [operations guide](docs/operations.md) for Access checks, release safety, and rollback.
+Both commands run browser-free checks and apply database migrations before deployment. Production also requires a clean working tree and a current commit already present on `origin/master`. A direct clone satisfies the Git requirements without write access to this repository. See the [operations guide](docs/operations.md) for Access checks, release safety, and rollback.
 
 ## Develop
 
