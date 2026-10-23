@@ -378,8 +378,16 @@ export const createBookmarkState = (adapters: {
         const hasCompletePinData = state.snapshot?.bookmarks.every(
           (bookmark) => bookmark.pinRank !== undefined,
         );
+        // Older servers omitted the sequence of a newly created Folder from the command
+        // result, which left cached snapshots unable to organize items in that Folder.
+        const sequenceFolderIds = new Set(
+          state.snapshot?.sequences.map((sequence) => sequence.folderId),
+        );
+        const hasCompleteSequences = state.snapshot?.folders.every((folder) =>
+          sequenceFolderIds.has(folder.id),
+        );
         const replacement = await adapters.remote.readSnapshot(
-          hasCompletePinData ? (state.snapshot?.revision ?? null) : null,
+          hasCompletePinData && hasCompleteSequences ? (state.snapshot?.revision ?? null) : null,
           controller.signal,
         );
         const synchronizedAt = new Date(lifecycle.now()).toISOString();

@@ -1473,7 +1473,10 @@ export const createBookmarkService = (
             folders: [folder],
             bookmarks: [],
             tags: [],
-            sequences: [updatedSequence],
+            sequences: [
+              updatedSequence,
+              { folderId: folder.id, folderVersion: 1, bookmarkVersion: 1 },
+            ],
           });
           await beforeCommandBatch();
           await database.batch([

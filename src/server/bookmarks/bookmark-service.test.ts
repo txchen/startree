@@ -298,7 +298,12 @@ describe('Bookmark Service Interface', () => {
       status: 'acknowledged',
       revision: 1,
       folders: [{ name: '  Work  ', version: 1, createdAt: now, modifiedAt: now }],
-      sequences: [{ folderId: SYSTEM_ROOT_FOLDER_ID, folderVersion: 2 }],
+      sequences: [{ folderId: SYSTEM_ROOT_FOLDER_ID, folderVersion: 2 }, {}],
+    });
+    expect(first.status === 'acknowledged' && first.sequences[1]).toEqual({
+      folderId: first.status === 'acknowledged' ? first.folders[0]!.id : undefined,
+      folderVersion: 1,
+      bookmarkVersion: 1,
     });
     expect(repeated).toEqual(first);
     expect(caseVariant).toMatchObject({ status: 'acknowledged', revision: 2 });

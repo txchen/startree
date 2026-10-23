@@ -124,6 +124,27 @@ describe('Bookmark state Module Interface', () => {
     }
   });
 
+  it('recovers Folder sequences missing from a retained snapshot whose revision matches the server', async () => {
+    const authoritative = snapshot(7);
+    const retained = structuredClone(authoritative);
+    retained.sequences = retained.sequences.filter((sequence) => sequence.folderId !== childAId);
+    const remote = createMemoryBookmarkRemoteAdapter(authoritative);
+    const storage = createMemoryBookmarkStorageAdapter({ snapshot: retained });
+    const state = createBookmarkState({ remote, storage });
+    try {
+      await state.initialize({ folderId });
+      expect(state.getState().sequences).toContainEqual({
+        folderId: childAId,
+        folderVersion: 1,
+        bookmarkVersion: 1,
+      });
+      await state.refresh();
+      expect(remote.requestedRevisions).toEqual([null, 7]);
+    } finally {
+      state.dispose();
+    }
+  });
+
   it('retains a selected Folder before publishing it as ready for an immediate reload', async () => {
     const storage = createMemoryBookmarkStorageAdapter();
     const state = createBookmarkState({
