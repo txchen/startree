@@ -86,17 +86,27 @@ const recoveryBytes = (recovery: string): Uint8Array<ArrayBuffer> => {
   if (!/^[a-f0-9]{64}$/.test(normalized)) throw new Error('Invalid recovery key.');
   return Uint8Array.from(normalized.match(/../g)!, (pair) => parseInt(pair, 16));
 };
+const encodeNotes = (notes: Note[]): Uint8Array<ArrayBuffer> => {
+  if (notes.length > 500) throw new Error('This notebook can hold up to 500 notes.');
+  const contents = v.parse(contentsSchema, { format: 1, notes });
+  const plaintext = encoder.encode(JSON.stringify(contents));
+  if (plaintext.byteLength > NOTES_PLAINTEXT_LIMIT) {
+    plaintext.fill(0);
+    throw new Error(
+      'Notes and version history exceed the 512 KB limit. Export a backup and remove unneeded notes. Existing saved versions have not been changed.',
+    );
+  }
+  return plaintext;
+};
+export const validateNotesForEncryption = (notes: Note[]): void => {
+  encodeNotes(notes).fill(0);
+};
 export const encryptNotes = async (
   key: CryptoKey,
   vault: EncryptedVault,
   notes: Note[],
 ): Promise<EncryptedVault> => {
-  const contents = v.parse(contentsSchema, { format: 1, notes });
-  const plaintext = encoder.encode(JSON.stringify(contents));
-  if (plaintext.byteLength > NOTES_PLAINTEXT_LIMIT)
-    throw new Error(
-      'Notes and version history exceed the 512 KB limit. Export a backup and remove unneeded notes. Existing saved versions have not been changed.',
-    );
+  const plaintext = encodeNotes(notes);
   try {
     return { ...vault, payload: await seal(key, plaintext, vault.id, 'contents') };
   } finally {

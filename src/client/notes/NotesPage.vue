@@ -15,12 +15,18 @@ watch(secretInput, (input) => input?.focus({ preventScroll: true }), { flush: 'p
 const confirmation = ref('');
 const recoveryMode = ref(false);
 const selectedDraft = ref('');
+watch([() => state.remote, () => state.drafts, selectedDraft], ([remote, drafts, selected]) => {
+  if (!drafts.some((draft) => draft.id === selected)) {
+    selectedDraft.value = remote ? '' : (drafts[0]?.id ?? '');
+  }
+});
 const recoveryKey = ref('');
 const recoveryCheck = ref('');
 const setupOpen = ref(false);
 const settingsOpen = ref(false);
 const formBusy = ref(false);
 const shielded = ref(false);
+const resumeError = ref('');
 const historyOpen = ref(false);
 const previewRevision = ref<number>();
 const leaveOpen = ref(false);
@@ -43,6 +49,7 @@ const keyboard = (event: KeyboardEvent) => {
     (event.ctrlKey || event.metaKey) &&
     event.key.toLowerCase() === 's' &&
     state.phase === 'unlocked' &&
+    !settingUp.value &&
     !shielded.value
   ) {
     event.preventDefault();
@@ -77,6 +84,7 @@ const clearSecrets = () => {
   settingsOpen.value = false;
   recoveryMode.value = false;
   shielded.value = false;
+  resumeError.value = '';
 };
 watch(
   () => state.phase,
@@ -123,7 +131,7 @@ const finishSetup = async () => {
   formBusy.value = false;
 };
 const lock = async () => {
-  if (formBusy.value) return false;
+  if (formBusy.value || shielded.value) return false;
   if (state.unsaved) {
     if (leaveOpen.value) return false;
     leaveOpen.value = true;
@@ -232,7 +240,6 @@ const useCloud = async () => {
 const dropDraft = async () => {
   if (selectedDraft.value && window.confirm('Permanently discard this encrypted local draft?')) {
     await session.removeDraft(selectedDraft.value);
-    selectedDraft.value = '';
   }
 };
 let lastActivity = Date.now();
@@ -249,8 +256,12 @@ const autoLock = async () => {
     return;
   locking = true;
   shielded.value = true;
-  await session.lock();
-  locking = false;
+  finishLeave?.(false);
+  try {
+    if (state.localSafe) await session.lock();
+  } finally {
+    locking = false;
+  }
 };
 const resumeHidden = async () => {
   formBusy.value = true;
@@ -258,8 +269,10 @@ const resumeHidden = async () => {
   password.value = '';
   if (await session.verifySessionPassword(secret)) {
     lastActivity = Date.now();
+    state.error = '';
+    resumeError.value = '';
     shielded.value = false;
-  } else state.error = 'The password could not unlock these notes.';
+  } else resumeError.value = 'The password could not unlock these notes.';
   formBusy.value = false;
 };
 const activity = () => {
@@ -321,7 +334,7 @@ onUnmounted(() => {
   >
     <header class="notes-page-heading">
       <h1>Notes <span>Private</span></h1>
-      <div v-if="state.phase === 'unlocked'" class="notes-page-actions">
+      <div v-if="state.phase === 'unlocked' && !shielded && !settingUp" class="notes-page-actions">
         <span class="notes-save-status" role="status">{{ state.status }}</span>
         <button
           class="notes-primary"
@@ -346,9 +359,11 @@ onUnmounted(() => {
         </button>
       </div>
     </header>
-    <div v-if="state.error" class="notes-message error" role="alert">
+    <div v-if="state.error && !shielded" class="notes-message error" role="alert">
       {{ state.error }}
-      <button v-if="state.phase === 'unlocked'" @click="session.flush()">Retry save</button>
+      <button v-if="state.phase === 'unlocked' && !settingUp" @click="session.flush()">
+        Retry save
+      </button>
     </div>
     <div v-if="state.phase === 'loading'" class="notes-empty" role="status">
       Loading encrypted notes…
@@ -363,6 +378,7 @@ onUnmounted(() => {
           You have unsaved changes. They remain in memory without creating a version. Enter your
           password to continue editing or save them.
         </p>
+        <p v-if="resumeError" class="notes-message error" role="alert">{{ resumeError }}</p>
         <label
           >Notes password<input
             ref="secretInput"

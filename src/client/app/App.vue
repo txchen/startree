@@ -58,14 +58,18 @@ const clearAndLogOut = async () => {
   if (notesPage.value && !(await notesPage.value.prepareToLeave())) return;
   loggingOut.value = true;
   try {
-    // Inspect encrypted drafts only on logout, never during Bookmark startup.
-    const { createNotesStorage } = await import('../notes/notes-storage');
-    const notesStorage = createNotesStorage();
     let hasDrafts = false;
     try {
-      hasDrafts = (await notesStorage.read()).drafts.length > 0;
-    } finally {
-      await notesStorage.close();
+      // Inspect encrypted drafts only on logout, never during Bookmark startup.
+      const { createNotesStorage } = await import('../notes/notes-storage');
+      const notesStorage = createNotesStorage();
+      try {
+        hasDrafts = (await notesStorage.read()).drafts.length > 0;
+      } finally {
+        await notesStorage.close();
+      }
+    } catch {
+      // Storage access can fail before the draft check completes.
     }
     if (
       hasDrafts &&
@@ -74,16 +78,18 @@ const clearAndLogOut = async () => {
       )
     )
       return;
-    await new Promise<void>((resolve, reject) => {
+    await new Promise<void>((resolve) => {
       const request = indexedDB.deleteDatabase('startree-notes');
-      request.onsuccess = () => resolve();
-      request.onerror = () => reject(request.error);
-    });
+      request.onsuccess = request.onerror = request.onblocked = () => resolve();
+    }).catch(() => undefined);
     await clearLocalApplicationData({
       clearIndexedDb: () => createIndexedDbBookmarkAdapter().clear(),
-      cacheStorage: caches,
-      serviceWorkerRegistrations: () => navigator.serviceWorker.getRegistrations(),
-    });
+      get cacheStorage() {
+        return globalThis.caches;
+      },
+      serviceWorkerRegistrations: async () =>
+        (await globalThis.navigator?.serviceWorker?.getRegistrations()) ?? [],
+    }).catch(() => undefined);
     window.location.assign('/cdn-cgi/access/logout');
   } finally {
     loggingOut.value = false;
@@ -101,7 +107,7 @@ const clearAndLogOut = async () => {
       <nav class="page-navigation" aria-label="Pages">
         <a
           href="/"
-          :aria-current="!notesVisible ? 'page' : undefined"
+          :aria-current="!notesVisible && page.matched ? 'page' : undefined"
           @click="navigate($event, '/')"
           >Bookmarks</a
         >
@@ -137,6 +143,10 @@ const clearAndLogOut = async () => {
         :legacy-folder-id="page.folderId"
         @canonicalize="canonicalize"
       />
+      <div v-else class="library-state">
+        <h1>Page not found</h1>
+        <a href="/" @click="navigate($event, '/')">Back to Bookmarks</a>
+      </div>
     </main>
   </div>
 </template>

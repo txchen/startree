@@ -111,6 +111,53 @@ describe('notes session safety', () => {
     await other.dispose();
     await f.session.dispose();
   });
+  it.each([
+    { count: 251, body: '', limit: '500 notes' },
+    { count: 2, body: 'x'.repeat(90_000), limit: '512 KB' },
+  ])(
+    'preserves the conflict and local draft when a merge exceeds $limit',
+    async ({ count, body, limit }) => {
+      const f = createFixture();
+      await setup(f);
+      const other = createNotesSession({
+        ...f.dependencies,
+        storage: createNotesStorage(new IDBFactory()),
+      });
+      try {
+        await other.initialize();
+        await other.unlock(password, false);
+        for (const [session, title] of [
+          [f.session, 'Cloud note'],
+          [other, 'Local note'],
+        ] as const) {
+          session.state.notes = Array.from({ length: count }, () => ({
+            id: crypto.randomUUID(),
+            title,
+            body,
+            updatedAt: new Date().toISOString(),
+          }));
+          session.changed();
+          await session.flush();
+          expect(session.state.localSafe).toBe(true);
+        }
+        expect(other.state.conflict).toBe(true);
+        const before = other.state.notes;
+        const draft = await other.encryptedExport();
+        const cloud = f.cloud();
+
+        await other.merge();
+
+        expect(other.state.conflict).toBe(true);
+        expect(other.state.error).toContain(limit);
+        expect(other.state.notes).toBe(before);
+        expect(await other.encryptedExport()).toEqual(draft);
+        expect(f.cloud()).toBe(cloud);
+      } finally {
+        await other.dispose();
+        await f.session.dispose();
+      }
+    },
+  );
   it('does not lock and discard edits when encrypted local retention fails', async () => {
     const f = createFixture();
     await setup(f);
@@ -265,6 +312,40 @@ it('keeps edits made during a manual save pending until the next explicit save',
   expect(note.history).toHaveLength(3);
   expect(f.session.state.unsaved).toBe(false);
   await f.session.dispose();
+});
+
+it('saves newer edits when a second flush is requested during an active save', async () => {
+  const f = createFixture();
+  await setup(f);
+  const write = f.dependencies.write;
+  let startWrite!: () => void;
+  let releaseWrite!: () => void;
+  const started = new Promise<void>((resolve) => (startWrite = resolve));
+  const blocked = new Promise<void>((resolve) => (releaseWrite = resolve));
+  f.dependencies.write = async (draft) => {
+    startWrite();
+    await blocked;
+    return write(draft);
+  };
+  try {
+    edit(f.session, 'First version');
+    const firstSave = f.session.flush();
+    await started;
+    f.session.state.notes[0]!.title = 'Second version';
+    f.session.changed();
+    const secondSave = f.session.flush();
+    releaseWrite();
+    await Promise.all([firstSave, secondSave]);
+    expect(f.session.state.unsaved).toBe(false);
+    const { notes } = await unlockVault(f.cloud().vault, password);
+    expect(notes[0]?.history?.map((entry) => entry.title)).toEqual([
+      'First version',
+      'Second version',
+    ]);
+  } finally {
+    releaseWrite();
+    await f.session.dispose();
+  }
 });
 
 it('rejects oversized history without pruning versions or replacing the cloud copy', async () => {

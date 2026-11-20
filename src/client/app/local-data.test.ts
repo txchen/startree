@@ -94,4 +94,20 @@ describe('Service Worker and local data boundaries', () => {
     ]);
     expect(cacheStorage.delete).not.toHaveBeenCalledWith('unrelated-cache');
   });
+
+  it('still clears Service Worker registrations when storage access throws', async () => {
+    const unregister = vi.fn(async () => true);
+    await expect(
+      clearLocalApplicationData({
+        clearIndexedDb: async () => {
+          throw new Error('IndexedDB unavailable');
+        },
+        get cacheStorage(): never {
+          throw new Error('Cache Storage unavailable');
+        },
+        serviceWorkerRegistrations: async () => [{ unregister }],
+      }),
+    ).rejects.toThrow('Cache Storage unavailable');
+    expect(unregister).toHaveBeenCalledOnce();
+  });
 });

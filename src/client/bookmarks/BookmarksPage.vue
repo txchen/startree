@@ -34,7 +34,7 @@ import {
   duplicateBookmarkGroups,
   recursiveBookmarkCountsByFolder,
 } from './bookmark-library';
-import { createBookmarkState, type BookmarkStateView } from './bookmark-state';
+import { byRank, createBookmarkState, type BookmarkStateView } from './bookmark-state';
 import { trapDialogFocus } from './dialog-focus';
 import FolderNavigation from './FolderNavigation.vue';
 
@@ -394,31 +394,31 @@ const sequenceFor = (folderId: string) =>
 
 const reorderFolder = async (folderId: string, beforeFolderId?: string) => {
   const folder = state.value.folders.find((item) => item.id === folderId);
-  const parent = state.value.selectedFolder;
-  const sequence = parent ? sequenceFor(parent.id) : undefined;
-  if (!folder || !parent || !sequence || folder.id === beforeFolderId) return;
-  await stateModule.executeCommand({
+  if (!folder?.parentId || folder.id === beforeFolderId) return null;
+  const sequence = sequenceFor(folder.parentId);
+  if (!sequence) return null;
+  return stateModule.executeCommand({
     type: 'reorderFolder',
     operationId: crypto.randomUUID(),
     folderId: folder.id,
     folderVersion: folder.version,
-    parentId: parent.id,
+    parentId: folder.parentId,
     expectedFolderSequenceVersion: sequence.folderVersion,
     ...(beforeFolderId ? { beforeFolderId } : {}),
   });
 };
 
 const reorderBookmark = async (bookmarkId: string, beforeBookmarkId?: string) => {
-  const bookmark = state.value.directBookmarks.find((item) => item.id === bookmarkId);
-  const parent = state.value.selectedFolder;
-  const sequence = parent ? sequenceFor(parent.id) : undefined;
-  if (!bookmark || !parent || !sequence || bookmark.id === beforeBookmarkId) return;
-  await stateModule.executeCommand({
+  const bookmark = state.value.bookmarks.find((item) => item.id === bookmarkId);
+  if (!bookmark || bookmark.id === beforeBookmarkId) return null;
+  const sequence = sequenceFor(bookmark.folderId);
+  if (!sequence) return null;
+  return stateModule.executeCommand({
     type: 'reorderBookmark',
     operationId: crypto.randomUUID(),
     bookmarkId: bookmark.id,
     bookmarkVersion: bookmark.version,
-    folderId: parent.id,
+    folderId: bookmark.folderId,
     expectedBookmarkSequenceVersion: sequence.bookmarkVersion,
     ...(beforeBookmarkId ? { beforeBookmarkId } : {}),
   });
@@ -493,7 +493,10 @@ const folderIsWithin = (candidateId: string, ancestorId: string): boolean => {
 
 const executeFolderMove = async (folderId: string) => {
   const folder = state.value.folders.find((item) => item.id === folderId);
-  if (!folder?.parentId || folder.parentId === moveDestinationId.value) return null;
+  if (!folder?.parentId) return null;
+  if (folder.parentId === moveDestinationId.value) {
+    return reorderFolder(folderId, moveBeforeId.value || undefined);
+  }
   const source = sequenceFor(folder.parentId);
   const destination = sequenceFor(moveDestinationId.value);
   if (!source || !destination) return null;
@@ -512,7 +515,10 @@ const executeFolderMove = async (folderId: string) => {
 
 const executeBookmarkMove = async (bookmarkId: string) => {
   const bookmark = state.value.bookmarks.find((item) => item.id === bookmarkId);
-  if (!bookmark || bookmark.folderId === moveDestinationId.value) return null;
+  if (!bookmark) return null;
+  if (bookmark.folderId === moveDestinationId.value) {
+    return reorderBookmark(bookmarkId, moveBeforeId.value || undefined);
+  }
   const source = sequenceFor(bookmark.folderId);
   const destination = sequenceFor(moveDestinationId.value);
   if (!source || !destination) return null;
@@ -540,6 +546,7 @@ const moveEditorModel = computed(() => {
       ),
       positions: state.value.folders
         .filter((folder) => folder.parentId === moveDestinationId.value && folder.id !== active.id)
+        .sort(byRank)
         .map((folder) => ({ id: folder.id, label: folder.name })),
       execute: () => executeFolderMove(active.id),
     };
@@ -551,6 +558,7 @@ const moveEditorModel = computed(() => {
       .filter(
         (bookmark) => bookmark.folderId === moveDestinationId.value && bookmark.id !== active.id,
       )
+      .sort(byRank)
       .map((bookmark) => ({ id: bookmark.id, label: bookmark.title })),
     execute: () => executeBookmarkMove(active.id),
   };

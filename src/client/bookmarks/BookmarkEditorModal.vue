@@ -46,7 +46,10 @@ const comparableValue = (): BookmarkEditorValue =>
         url: url.value,
         title: title.value,
         note: note.value,
-        tags: tags.value.trim() ? tags.value.split(',').map((tag) => tag.trim()) : [],
+        tags: tags.value
+          .split(',')
+          .map((tag) => tag.trim())
+          .filter(Boolean),
       };
 const dirty = computed(
   () => JSON.stringify(comparableValue()) !== JSON.stringify(props.initialValue),
@@ -97,7 +100,8 @@ const fillHostnameAfterPaste = () => {
 };
 
 const addSuggestedTag = (tag: string) => {
-  tags.value = tags.value.trim() ? `${tags.value.replace(/\s*$/, '')}, ${tag}` : tag;
+  const existing = tags.value.replace(/[,\s]+$/, '');
+  tags.value = existing ? `${existing}, ${tag}` : tag;
   void nextTick(() => tagInput.value?.focus());
 };
 

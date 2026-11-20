@@ -43,6 +43,8 @@ const keydown = (event: KeyboardEvent) => {
   }
   const buttons = [...(panel.value?.querySelectorAll<HTMLButtonElement>('button') ?? [])];
   const index = buttons.indexOf(document.activeElement as HTMLButtonElement);
+  const lastIndex = buttons.length - 1;
+  if (index < 0) return;
   const offsets: Record<string, number> = {
     ArrowRight: 1,
     ArrowLeft: -1,
@@ -50,16 +52,16 @@ const keydown = (event: KeyboardEvent) => {
     ArrowUp: -2,
   };
   const offset = offsets[event.key];
-  if (offset !== undefined || event.key === 'Home' || event.key === 'End') {
-    event.preventDefault();
-    const next =
-      event.key === 'Home'
-        ? 0
-        : event.key === 'End'
-          ? buttons.length - 1
-          : (index + offset! + buttons.length) % buttons.length;
-    buttons[next]?.focus();
-  }
+  let next: number;
+  if (event.key === 'Home') next = 0;
+  else if (event.key === 'End') next = lastIndex;
+  else if (offset === undefined) return;
+  else if (event.key === 'ArrowDown') next = Math.min(index + offset, lastIndex);
+  else next = (index + offset + buttons.length) % buttons.length;
+  const target = buttons[next];
+  if (!target || next === index) return;
+  event.preventDefault();
+  target.focus();
 };
 onMounted(() => document.addEventListener('pointerdown', outside));
 onUnmounted(() => document.removeEventListener('pointerdown', outside));

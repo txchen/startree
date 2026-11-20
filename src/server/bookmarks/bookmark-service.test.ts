@@ -721,7 +721,55 @@ describe('Bookmark Service Interface', () => {
     expect(cycle).toMatchObject({ status: 'conflict', code: 'folder_cycle' });
     expect(depth).toMatchObject({ status: 'conflict', code: 'folder_depth' });
     expect(nameConflict).toMatchObject({ status: 'conflict', code: 'name_conflict' });
+    await expect(
+      service.executeCommand({
+        type: 'createFolder',
+        operationId: crypto.randomUUID(),
+        parentId: ids[9]!,
+        expectedFolderSequenceVersion: 1,
+        name: 'Too deep',
+      }),
+    ).resolves.toMatchObject({ status: 'conflict', code: 'folder_depth' });
     expect((await service.getSnapshot()).revision).toBe(0);
+
+    const trashed = await service.executeCommand({
+      type: 'trashFolder',
+      operationId: crypto.randomUUID(),
+      folderId: ids[9]!,
+      folderVersion: 1,
+      parentId: ids[8]!,
+      expectedFolderSequenceVersion: 1,
+    });
+    expect(trashed.status).toBe('acknowledged');
+    await expect(
+      service.executeCommand({
+        type: 'restoreTrash',
+        operationId: crypto.randomUUID(),
+        rootKind: 'folder',
+        rootId: ids[9]!,
+        rootVersion: 2,
+        expectedDestinationSequenceVersion: 2,
+      }),
+    ).resolves.toMatchObject({ status: 'conflict', code: 'folder_depth' });
+    expect((await service.getTrash()).roots).toMatchObject([{ id: ids[9] }]);
+    expect((await service.getSnapshot()).revision).toBe(1);
+  });
+
+  it('rejects editing the system root Folder without changing it', async () => {
+    const service = createBookmarkService(database);
+    await expect(
+      service.executeCommand({
+        type: 'editFolder',
+        operationId: crypto.randomUUID(),
+        folderId: SYSTEM_ROOT_FOLDER_ID,
+        folderVersion: 1,
+        name: 'New root name',
+      }),
+    ).resolves.toMatchObject({ status: 'conflict', code: 'missing_entity' });
+    expect(await service.getSnapshot()).toMatchObject({
+      revision: 0,
+      folders: [{ id: SYSTEM_ROOT_FOLDER_ID, name: '', version: 1 }],
+    });
   });
 
   it('rejects stale organization versions and rebalances exhausted rank space without visible reorder', async () => {
@@ -827,9 +875,9 @@ describe('Bookmark Service Interface', () => {
           .bind(id),
         database
           .prepare(
-            "INSERT INTO bookmark_sequences (folder_id, kind, version) VALUES (?, 'bookmarks', 1)",
+            "INSERT INTO bookmark_sequences (folder_id, kind, version) VALUES (?, 'bookmarks', ?)",
           )
-          .bind(id),
+          .bind(id, id === childId ? 4 : 1),
       ]),
       database
         .prepare(
@@ -883,7 +931,15 @@ describe('Bookmark Service Interface', () => {
       expectedDestinationSequenceVersion: 2,
     });
 
-    expect(restored).toMatchObject({ status: 'acknowledged', revision: 2 });
+    expect(restored).toMatchObject({
+      status: 'acknowledged',
+      revision: 2,
+      sequences: [
+        { folderId: SYSTEM_ROOT_FOLDER_ID, folderVersion: 3, bookmarkVersion: 1 },
+        { folderId, folderVersion: 1, bookmarkVersion: 1 },
+        { folderId: childId, folderVersion: 1, bookmarkVersion: 4 },
+      ],
+    });
     expect((await service.getTrash()).roots).toEqual([]);
     expect(
       (await service.getSnapshot()).folders.find((folder) => folder.id === folderId),

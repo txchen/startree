@@ -79,16 +79,25 @@ type ServiceWorkerRegistrationBoundary = { unregister(): Promise<boolean> };
 
 export const clearLocalApplicationData = async (boundaries: {
   clearIndexedDb(): Promise<void>;
-  cacheStorage: CacheStorageBoundary;
+  cacheStorage?: CacheStorageBoundary;
   serviceWorkerRegistrations(): Promise<readonly ServiceWorkerRegistrationBoundary[]>;
 }): Promise<void> => {
-  await boundaries.clearIndexedDb();
-  const cacheNames = await boundaries.cacheStorage.keys();
-  await Promise.all(
-    cacheNames
-      .filter((name) => name.startsWith(`${APPLICATION_CACHE_PREFIX}-`))
-      .map((name) => boundaries.cacheStorage.delete(name)),
-  );
-  const registrations = await boundaries.serviceWorkerRegistrations();
-  await Promise.all(registrations.map((registration) => registration.unregister()));
+  try {
+    await boundaries.clearIndexedDb();
+  } finally {
+    try {
+      const cacheStorage = boundaries.cacheStorage;
+      if (cacheStorage) {
+        const cacheNames = await cacheStorage.keys();
+        await Promise.all(
+          cacheNames
+            .filter((name) => name.startsWith(`${APPLICATION_CACHE_PREFIX}-`))
+            .map((name) => cacheStorage.delete(name)),
+        );
+      }
+    } finally {
+      const registrations = await boundaries.serviceWorkerRegistrations();
+      await Promise.all(registrations.map((registration) => registration.unregister()));
+    }
+  }
 };

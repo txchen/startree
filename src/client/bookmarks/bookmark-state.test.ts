@@ -305,6 +305,54 @@ describe('Bookmark state Module Interface', () => {
     state.dispose();
   });
 
+  it.each([
+    { trashedId: childAId, parentId: folderId, deletedFolderIds: [childAId] },
+    {
+      trashedId: folderId,
+      parentId: SYSTEM_ROOT_FOLDER_ID,
+      deletedFolderIds: [folderId, childAId, childBId],
+    },
+  ])(
+    'selects and remembers the parent after trashing Folder $trashedId',
+    async ({ trashedId, parentId, deletedFolderIds }) => {
+      const initial = snapshot();
+      const storage = createMemoryBookmarkStorageAdapter();
+      const remote = createMemoryBookmarkRemoteAdapter(initial);
+      remote.executeCommand = async ({ operationId }) => ({
+        status: 'acknowledged',
+        operationId,
+        revision: 2,
+        folders: [],
+        bookmarks: [],
+        tags: [],
+        sequences: [{ folderId: parentId, folderVersion: 2, bookmarkVersion: 1 }],
+        deletedFolderIds,
+        deletedBookmarkIds: initial.bookmarks
+          .filter((bookmark) => deletedFolderIds.includes(bookmark.folderId))
+          .map((bookmark) => bookmark.id),
+      });
+      const state = createBookmarkState({ remote, storage });
+      try {
+        await state.initialize({ folderId: childAId });
+        await state.executeCommand({
+          type: 'trashFolder',
+          operationId: crypto.randomUUID(),
+          folderId: trashedId,
+          folderVersion: 1,
+          parentId,
+          expectedFolderSequenceVersion: 1,
+        });
+        expect(state.getState()).toMatchObject({
+          status: 'ready',
+          selectedFolder: { id: parentId },
+        });
+        expect(await storage.readNavigation()).toMatchObject({ selectedFolderId: parentId });
+      } finally {
+        state.dispose();
+      }
+    },
+  );
+
   it('initializes from adapters and exposes only direct children in independent order', async () => {
     const remote = createMemoryBookmarkRemoteAdapter(snapshot());
     const storage = createMemoryBookmarkStorageAdapter();
@@ -995,19 +1043,27 @@ describe('Bookmark state Module Interface', () => {
     state.dispose();
   });
 
-  it('serializes writes so only one command is in flight', async () => {
+  it('keeps command order when a caller queues another write as the first settles', async () => {
     const remote = createMemoryBookmarkRemoteAdapter(snapshot());
+    const storage = createMemoryBookmarkStorageAdapter();
+    const executed: string[] = [];
     let active = 0;
     let maximumActive = 0;
+    let revision = 1;
+    storage.writeUnconfirmedOperation = () => Promise.reject(new Error('Retention failed'));
     remote.executeCommand = async (command) => {
+      executed.push(command.operationId);
       active += 1;
       maximumActive = Math.max(maximumActive, active);
       await Promise.resolve();
       active -= 1;
+      if (command.type === 'editFolder' && command.name === 'Two') {
+        throw new UnknownBookmarkCommandError('Response lost');
+      }
       return {
         status: 'acknowledged',
         operationId: command.operationId,
-        revision: 2,
+        revision: ++revision,
         folders: [],
         bookmarks: [],
         tags: [],
@@ -1016,30 +1072,31 @@ describe('Bookmark state Module Interface', () => {
     };
     const state = createBookmarkState({
       remote,
-      storage: createMemoryBookmarkStorageAdapter(),
+      storage,
       lifecycle: createMemoryBookmarkLifecycleAdapter(),
     });
     await state.initialize({ folderId });
 
-    await Promise.all([
+    const submit = (name: string, operationId: string) =>
       state.executeCommand({
         type: 'editFolder',
-        operationId: 'a0000000-0000-4000-8000-000000000004',
+        operationId,
         folderId,
         folderVersion: 1,
-        name: 'One',
-      }),
-      state.executeCommand({
-        type: 'editFolder',
-        operationId: 'a0000000-0000-4000-8000-000000000005',
-        folderId,
-        folderVersion: 1,
-        name: 'Two',
-      }),
-    ]);
-
-    expect(maximumActive).toBe(1);
-    state.dispose();
+        name,
+      });
+    const operationIds = Array.from({ length: 3 }, () => crypto.randomUUID());
+    try {
+      const first = submit('One', operationIds[0]!);
+      const second = submit('Two', operationIds[1]!);
+      const third = first.then(() => submit('Three', operationIds[2]!));
+      await expect(second).rejects.toThrow('Retention failed');
+      await expect(third).resolves.toMatchObject({ status: 'acknowledged' });
+      expect(executed).toEqual(operationIds);
+      expect(maximumActive).toBe(1);
+    } finally {
+      state.dispose();
+    }
   });
 
   it('refreshes the complete snapshot when a conflict reports a revision gap', async () => {

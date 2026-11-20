@@ -44,6 +44,7 @@ type RankedRow = { id: string; rank: Rank };
 type TrashRootKind = Extract<BookmarkCommand, { type: 'restoreTrash' }>['rootKind'];
 
 const TRASH_RETENTION_MS = 30 * 24 * 60 * 60 * 1_000;
+const MAX_FOLDER_DEPTH = 10;
 
 const trashRootStorage = (kind: TrashRootKind) =>
   kind === 'folder'
@@ -222,6 +223,50 @@ const sequenceStatement = (database: BookmarkDatabase, folderId: string) =>
        HAVING COUNT(*) = 2`,
     )
     .bind(folderId);
+
+const folderDepth = async (database: BookmarkDatabase, folderId: string): Promise<number> => {
+  const row = await database
+    .prepare(
+      `WITH RECURSIVE ancestors(id, parent_id, depth) AS (
+         SELECT id, parent_id, 0 FROM bookmark_folders WHERE id = ?
+         UNION ALL
+         SELECT parent.id, parent.parent_id, child.depth + 1
+         FROM bookmark_folders parent JOIN ancestors child ON parent.id = child.parent_id
+       ) SELECT MAX(depth) AS depth FROM ancestors`,
+    )
+    .bind(folderId)
+    .first<{ depth: number | null }>();
+  return row?.depth ?? 0;
+};
+
+const folderSubtreeHeight = async (
+  database: BookmarkDatabase,
+  folderId: string,
+  trashRootId: string | null = null,
+): Promise<number> => {
+  const row = await database
+    .prepare(
+      `WITH RECURSIVE descendants(id, depth) AS (
+         SELECT id, 0 FROM bookmark_folders WHERE id = ?
+         UNION ALL
+         SELECT child.id, parent.depth + 1 FROM bookmark_folders child
+         JOIN descendants parent ON child.parent_id = parent.id
+         WHERE child.trashed_at IS NULL AND child.trash_root_id IS ?
+       ) SELECT MAX(depth) AS height FROM descendants`,
+    )
+    .bind(folderId, trashRootId)
+    .first<{ height: number | null }>();
+  return row?.height ?? 0;
+};
+
+const exceedsFolderDepth = async (
+  database: BookmarkDatabase,
+  destinationId: string,
+  subtreeHeight: number | Promise<number> = 0,
+): Promise<boolean> => {
+  const [depth, height] = await Promise.all([folderDepth(database, destinationId), subtreeHeight]);
+  return depth + 1 + height > MAX_FOLDER_DEPTH;
+};
 
 const nextRank = async (
   database: BookmarkDatabase,
@@ -833,32 +878,13 @@ export const createBookmarkService = (
           .bind(moving.id, destinationId)
           .first<{ id: string }>();
         if (cycle) return conflict(organizationCommand, 'folder_cycle', { folderId: moving.id });
-        const [destinationDepth, subtreeHeight] = await Promise.all([
-          database
-            .prepare(
-              `WITH RECURSIVE ancestors(id, parent_id, depth) AS (
-                 SELECT id, parent_id, 0 FROM bookmark_folders WHERE id = ?
-                 UNION ALL
-                 SELECT parent.id, parent.parent_id, child.depth + 1
-                 FROM bookmark_folders parent JOIN ancestors child ON parent.id = child.parent_id
-               ) SELECT MAX(depth) AS value FROM ancestors`,
-            )
-            .bind(destinationId)
-            .first<{ value: number }>(),
-          database
-            .prepare(
-              `WITH RECURSIVE descendants(id, depth) AS (
-                 SELECT id, 0 FROM bookmark_folders WHERE id = ?
-                 UNION ALL
-                 SELECT child.id, parent.depth + 1 FROM bookmark_folders child
-                 JOIN descendants parent ON child.parent_id = parent.id
-                 WHERE child.trashed_at IS NULL AND child.trash_root_id IS NULL
-               ) SELECT MAX(depth) AS value FROM descendants`,
-            )
-            .bind(moving.id)
-            .first<{ value: number }>(),
-        ]);
-        if ((destinationDepth?.value ?? 0) + 1 + (subtreeHeight?.value ?? 0) > 10) {
+        if (
+          await exceedsFolderDepth(
+            database,
+            destinationId,
+            folderSubtreeHeight(database, moving.id),
+          )
+        ) {
           return conflict(organizationCommand, 'folder_depth', { folderId: moving.id });
         }
       }
@@ -1220,6 +1246,15 @@ export const createBookmarkService = (
           .bind(destinationId, root.name, root.id)
           .first<{ id: string }>();
         if (duplicate) return conflict(restoreCommand, 'name_conflict', { folderId: duplicate.id });
+        if (
+          await exceedsFolderDepth(
+            database,
+            destinationId,
+            folderSubtreeHeight(database, root.id, root.id),
+          )
+        ) {
+          return conflict(restoreCommand, 'folder_depth', { folderId: root.id });
+        }
       }
       const { parentColumn, sequenceKind: kind, originalParentColumn } = storage;
       const rankConflict = await database
@@ -1233,15 +1268,25 @@ export const createBookmarkService = (
         ? await nextRank(database, table, parentColumn, destinationId)
         : toRank(root.originalRank);
       const trash = await readTrash(database);
-      const restoredFolderIds = new Set<string>();
-      if (restoreCommand.rootKind === 'folder') {
-        const rows = await database
-          .prepare(`SELECT id FROM bookmark_folders WHERE id = ? OR trash_root_id = ?`)
-          .bind(root.id, root.id)
-          .all<{ id: string }>();
-        restoredFolderIds.clear();
-        rows.results.forEach((row) => restoredFolderIds.add(row.id));
-      }
+      const restoredSequences =
+        restoreCommand.rootKind === 'folder'
+          ? (
+              await database
+                .prepare(
+                  `SELECT folder.id AS folderId,
+                          MAX(CASE WHEN sequence.kind = 'folders' THEN sequence.version END) AS folderVersion,
+                          MAX(CASE WHEN sequence.kind = 'bookmarks' THEN sequence.version END) AS bookmarkVersion
+                     FROM bookmark_folders folder
+                     LEFT JOIN bookmark_sequences sequence ON sequence.folder_id = folder.id
+                    WHERE folder.id = ? OR folder.trash_root_id = ?
+                    GROUP BY folder.id
+                    ORDER BY folder.id`,
+                )
+                .bind(root.id, root.id)
+                .all<SequenceRow>()
+            ).results
+          : [];
+      const restoredFolderIds = new Set(restoredSequences.map((sequence) => sequence.folderId));
       const restoredBookmarkIds =
         restoreCommand.rootKind === 'bookmark'
           ? new Set([root.id])
@@ -1292,6 +1337,7 @@ export const createBookmarkService = (
               ? { folderVersion: sequence.folderVersion + 1 }
               : { bookmarkVersion: sequence.bookmarkVersion + 1 }),
           },
+          ...restoredSequences,
         ],
       });
       await beforeCommandBatch();
@@ -1451,6 +1497,9 @@ export const createBookmarkService = (
             return conflict(command, 'stale_sequence', { sequenceFolderId: command.parentId });
           }
           if (duplicate) return conflict(command, 'name_conflict', { folderId: duplicate.id });
+          if (await exceedsFolderDepth(database, command.parentId)) {
+            return conflict(command, 'folder_depth', { folderId: command.parentId });
+          }
 
           const folder: BookmarkFolder = {
             id: randomUUID(),
@@ -1535,6 +1584,8 @@ export const createBookmarkService = (
         },
 
         editFolder: async (command) => {
+          if (command.folderId === SYSTEM_ROOT_FOLDER_ID)
+            return conflict(command, 'missing_entity');
           const folder = await folderStatement(database, command.folderId).first<FolderRow>();
           if (!folder) return conflict(command, 'missing_entity');
           if (folder.version !== command.folderVersion) {

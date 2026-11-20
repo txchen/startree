@@ -1,7 +1,11 @@
 import { describe, expect, it } from 'vitest';
 
 import { SYSTEM_ROOT_FOLDER_ID, type BookmarkSnapshot } from '../../shared/bookmarks/contracts';
-import { BOOKMARK_SEARCH_RESULT_LIMIT, createMiniSearchBookmarkAdapter } from './bookmark-search';
+import {
+  BOOKMARK_SEARCH_RESULT_LIMIT,
+  createMiniSearchBookmarkAdapter,
+  createWorkerBookmarkSearchAdapter,
+} from './bookmark-search';
 
 const folderId = '10000000-0000-4000-8000-000000000001';
 const childFolderId = '10000000-0000-4000-8000-000000000002';
@@ -64,6 +68,26 @@ const snapshot = (revision = 1): BookmarkSnapshot => ({
   ],
   tags: [{ bookmarkId: '20000000-0000-4000-8000-000000000001', value: 'Café' }],
   sequences: [],
+});
+
+it.each(['error', 'messageerror'])('rejects pending search requests on Worker %s', async (type) => {
+  class FakeWorker extends EventTarget {
+    postMessage() {}
+    terminate() {}
+  }
+  const worker = new FakeWorker();
+  const adapter = createWorkerBookmarkSearchAdapter(worker as unknown as Worker);
+  const results = Promise.allSettled([adapter.replace(snapshot()), adapter.search('needle')]);
+  worker.dispatchEvent(new Event(type));
+  try {
+    expect(await results).toEqual([
+      { status: 'rejected', reason: expect.any(Error) },
+      { status: 'rejected', reason: expect.any(Error) },
+    ]);
+    await expect(adapter.search('another query')).rejects.toThrow(/Search Worker/);
+  } finally {
+    adapter.dispose();
+  }
 });
 
 describe('Bookmark search Adapter Interface', () => {

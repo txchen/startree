@@ -2,6 +2,7 @@
 import { computed } from 'vue';
 
 import type { BookmarkFolder } from '../../shared/bookmarks/contracts';
+import { byRank } from './bookmark-state';
 
 defineOptions({ name: 'FolderTree' });
 
@@ -19,9 +20,7 @@ const emit = defineEmits<{
 }>();
 
 const children = computed(() =>
-  props.folders
-    .filter((folder) => folder.parentId === props.parentId)
-    .sort((left, right) => left.rank.localeCompare(right.rank) || left.id.localeCompare(right.id)),
+  props.folders.filter((folder) => folder.parentId === props.parentId).sort(byRank),
 );
 
 const hasChildren = (folderId: string) =>

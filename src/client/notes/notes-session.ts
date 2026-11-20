@@ -2,7 +2,14 @@ import * as v from 'valibot';
 import { vaultWriteSchema } from '../../shared/notes/contracts';
 import { reactive } from 'vue';
 import type { EncryptedVault, VaultRecord, VaultWrite } from '../../shared/notes/contracts';
-import { createVault, decryptNotes, encryptNotes, unlockVault, type Note } from './notes-crypto';
+import {
+  createVault,
+  decryptNotes,
+  encryptNotes,
+  unlockVault,
+  validateNotesForEncryption,
+  type Note,
+} from './notes-crypto';
 import {
   createNotesStorage,
   fetchNotes,
@@ -10,6 +17,20 @@ import {
   writeNotes,
   type NotesDraft,
 } from './notes-storage';
+
+const notesWithSavedHistory = (notes: Note[]): Note[] =>
+  notes.map((note) => {
+    const history = [...(note.history ?? [])];
+    const latest = history.at(-1);
+    if (!latest || latest.title !== note.title || latest.body !== note.body)
+      history.push({
+        revision: (latest?.revision ?? 0) + 1,
+        title: note.title,
+        body: note.body,
+        savedAt: new Date().toISOString(),
+      });
+    return { ...note, history };
+  });
 
 type Dependencies = {
   storage: ReturnType<typeof createNotesStorage>;
@@ -131,31 +152,25 @@ export const createNotesSession = (
     }
   };
   const flush = async (): Promise<void> => {
-    if (job) {
-      await job;
-      return;
-    }
-    if (!key || !vault || state.phase !== 'unlocked') return;
     const token = epoch;
+    while (job && token === epoch) await job;
+    if (
+      token !== epoch ||
+      !key ||
+      !vault ||
+      state.phase !== 'unlocked' ||
+      (editVersion <= durableVersion && !pending)
+    )
+      return;
     const activeKey = key;
+    const activeVault = vault;
     state.saving = true;
     job = (async () => {
       try {
         if (editVersion > durableVersion) {
           const version = editVersion;
-          const notes = state.notes.map((note) => {
-            const history = [...(note.history ?? [])];
-            const latest = history.at(-1);
-            if (!latest || latest.title !== note.title || latest.body !== note.body)
-              history.push({
-                revision: (latest?.revision ?? 0) + 1,
-                title: note.title,
-                body: note.body,
-                savedAt: new Date().toISOString(),
-              });
-            return { ...note, history };
-          });
-          const encrypted = await encryptNotes(activeKey, vault!, notes);
+          const notes = notesWithSavedHistory(state.notes);
+          const encrypted = await encryptNotes(activeKey, activeVault, notes);
           if (token !== epoch) return;
           const write: VaultWrite = {
             expectedRevision: revision,
@@ -212,10 +227,11 @@ export const createNotesSession = (
           state.localSafe = false;
         }
       }
-    })();
+    })().finally(() => {
+      job = null;
+      state.saving = false;
+    });
     await job;
-    job = null;
-    state.saving = false;
   };
   const changed = () => {
     state.unsaved = fingerprint(state.notes) !== savedContent;
@@ -330,6 +346,7 @@ export const createNotesSession = (
         );
       const cloudNotes = await decryptNotes(activeKey, remote.vault);
       if (token !== epoch) return;
+      if (!state.localSafe) throw new Error('Save your changes before merging notes.');
       // Preserve both sides, including local deletions, by making explicitly named local copies.
       const copies = state.notes
         .filter(
@@ -347,12 +364,15 @@ export const createNotesSession = (
           id: crypto.randomUUID(),
           title: `${note.title.slice(0, 280)} (local copy)`,
         }));
-      state.notes = [...copies, ...cloudNotes];
+      const mergedNotes = notesWithSavedHistory([...copies, ...cloudNotes]);
+      validateNotesForEncryption(mergedNotes);
+      state.notes = mergedNotes;
       revision = remote.revision;
       state.remote = remote;
       vault = remote.vault;
       state.conflict = false;
       changed();
+      editVersion = durableVersion + 1;
       await flush();
     } catch (error) {
       state.error = errorMessage(error);

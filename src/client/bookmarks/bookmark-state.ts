@@ -152,8 +152,11 @@ const createDefaultLifecycleAdapter = (): BookmarkLifecycleAdapter => ({
   },
 });
 
-const byRank = <Item extends { id: string; rank: string }>(left: Item, right: Item): number =>
-  left.rank.localeCompare(right.rank) || left.id.localeCompare(right.id);
+export const byRank = <Item extends { id: string; rank: string }>(
+  left: Item,
+  right: Item,
+): number =>
+  left.rank < right.rank ? -1 : left.rank > right.rank ? 1 : left.id.localeCompare(right.id);
 
 const positionOptimistically = <Item extends { id: string; rank: string }>(
   items: Item[],
@@ -266,8 +269,7 @@ export const createBookmarkState = (adapters: {
   let lifecycleBound = false;
   const lifecycleUnsubscribers: Array<() => void> = [];
   let searchRequest = 0;
-  let writeBusy = false;
-  let writeQueue: Promise<unknown> = Promise.resolve();
+  let writeQueue: Promise<void> | null = null;
 
   const emit = () => {
     const view = viewFor(state);
@@ -616,7 +618,10 @@ export const createBookmarkState = (adapters: {
         ...result.tags,
       ],
       sequences: [
-        ...snapshot.sequences.filter((sequence) => !sequenceFolderIds.has(sequence.folderId)),
+        ...snapshot.sequences.filter(
+          (sequence) =>
+            !sequenceFolderIds.has(sequence.folderId) && !deletedFolderIds.has(sequence.folderId),
+        ),
         ...result.sequences,
       ],
     };
@@ -680,20 +685,34 @@ export const createBookmarkState = (adapters: {
             : result.code === 'folder_cycle'
               ? 'A Folder cannot be moved into itself or its descendant.'
               : result.code === 'folder_depth'
-                ? 'The move would exceed ten Folder levels.'
+                ? 'This change would exceed ten Folder levels.'
                 : result.code === 'name_conflict'
                   ? 'The destination already has a Folder with that exact name.'
                   : 'The item changed elsewhere. Review the current authoritative data.';
         emit();
         return result;
       }
+      const deletedFolderIds = result.deletedFolderIds ?? [];
+      const selectionDeleted = deletedFolderIds.includes(state.selectedFolderId);
+      if (selectionDeleted) {
+        const parentId = command.type === 'trashFolder' ? command.parentId : undefined;
+        state.selectedFolderId =
+          parentId &&
+          !deletedFolderIds.includes(parentId) &&
+          priorSnapshot.folders.some((folder) => folder.id === parentId)
+            ? parentId
+            : SYSTEM_ROOT_FOLDER_ID;
+        state.status = 'ready';
+      }
       if (result.revision !== priorSnapshot.revision + 1) {
         state.writeStatus = 'pending';
         state.writeMessage = 'Refreshing authoritative Bookmarks…';
         emit();
         await refresh();
+        if (selectionDeleted) await writeNavigation();
       } else {
         state.snapshot = mergeCommandResult(priorSnapshot, result);
+        if (selectionDeleted) await writeNavigation();
         const synchronizedAt = new Date(lifecycle.now()).toISOString();
         await adapters.storage.writeSnapshot(state.snapshot, { synchronizedAt });
         if (adapters.search) {
@@ -766,21 +785,19 @@ export const createBookmarkState = (adapters: {
   };
 
   const enqueueCommand = (command: BookmarkCommand): Promise<BookmarkCommandResult | null> => {
-    if (!writeBusy) {
-      writeBusy = true;
-      const immediate = performCommand(command);
-      writeQueue = immediate.finally(() => {
-        writeBusy = false;
-      });
-      return immediate;
-    }
-    const queued = writeQueue.then(() => {
-      writeBusy = true;
-      return performCommand(command);
-    });
-    writeQueue = queued.finally(() => {
-      writeBusy = false;
-    });
+    const previous = writeQueue;
+    let start: (() => void) | undefined;
+    const queued = previous
+      ? previous.then(() => performCommand(command))
+      : new Promise<BookmarkCommandResult | null>((resolve) => {
+          start = () => resolve(performCommand(command));
+        });
+    const clear = () => {
+      if (writeQueue === tail) writeQueue = null;
+    };
+    const tail = queued.then(clear, clear);
+    writeQueue = tail;
+    start?.();
     return queued;
   };
 

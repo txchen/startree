@@ -358,6 +358,7 @@ export const createWorkerBookmarkSearchAdapter = (
 ): BookmarkSearchAdapter => {
   let requestId = 0;
   let indexedRevision: number | null = null;
+  let workerFailure: Error | null = null;
   const pending = new Map<
     number,
     { resolve(value: SearchWorkerResponse): void; reject(reason: Error): void }
@@ -370,11 +371,25 @@ export const createWorkerBookmarkSearchAdapter = (
     else request.resolve(event.data);
   });
 
+  const fail = (error: Error) => {
+    workerFailure = error;
+    indexedRevision = null;
+    for (const request of pending.values()) request.reject(error);
+    pending.clear();
+  };
+  worker.addEventListener('error', (event) => {
+    fail(new Error(event.message || 'Search Worker failed.'));
+  });
+  worker.addEventListener('messageerror', () => {
+    fail(new Error('Search Worker response could not be read.'));
+  });
+
   const send = (request: SearchWorkerCommand): Promise<SearchWorkerResponse> => {
+    if (workerFailure) return Promise.reject(workerFailure);
     const nextRequestId = ++requestId;
     return new Promise((resolve, reject) => {
-      pending.set(nextRequestId, { resolve, reject });
       worker.postMessage({ ...request, requestId: nextRequestId });
+      pending.set(nextRequestId, { resolve, reject });
     });
   };
 
@@ -382,7 +397,7 @@ export const createWorkerBookmarkSearchAdapter = (
     async replace(snapshot) {
       if (snapshot.revision === indexedRevision) return;
       const response = await send({ type: 'replace', snapshot });
-      if (response.type === 'replaced') indexedRevision = response.revision;
+      if (response.type === 'replaced' && !workerFailure) indexedRevision = response.revision;
     },
     async search(query, filters = EMPTY_BOOKMARK_SEARCH_FILTERS, scopeFolderId = null) {
       const response = await send({ type: 'search', query, filters, scopeFolderId });
@@ -390,10 +405,8 @@ export const createWorkerBookmarkSearchAdapter = (
     },
     revision: () => indexedRevision,
     dispose() {
-      for (const request of pending.values()) request.reject(new Error('Search Worker stopped.'));
-      pending.clear();
+      fail(new Error('Search Worker stopped.'));
       worker.terminate();
-      indexedRevision = null;
     },
   };
 };
