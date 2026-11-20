@@ -949,6 +949,12 @@ h2 {
   white-space: nowrap;
 }
 
+.duplicate-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
 .duplicate-group li button {
   flex: 0 0 auto;
   padding: 6px 9px;
@@ -958,6 +964,12 @@ h2 {
   background: var(--danger-soft);
   cursor: pointer;
   font-size: 0.72rem;
+}
+
+.duplicate-group .duplicate-actions button:first-child {
+  border-color: var(--border);
+  color: var(--text);
+  background: var(--surface);
 }
 
 .trash-list {
@@ -1330,6 +1342,10 @@ h2 {
 .bookmark-editor button:disabled {
   cursor: wait;
   opacity: 0.65;
+}
+
+.editor-error {
+  color: var(--danger);
 }
 
 .discard-prompt {

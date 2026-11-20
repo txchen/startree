@@ -409,6 +409,7 @@ const verifyLocalWorker = async (scenario) => {
         await page.unrouteAll({ behavior: 'wait' });
         await page.getByRole('button', { name: 'Retry same operation' }).click();
         await page.getByText('The save result is unknown.').waitFor({ state: 'detached' });
+        await page.locator('.write-status.pending').waitFor({ state: 'detached' });
 
         const articlesTile = page.locator('.folder-tile', { hasText: 'Articles' });
         const uiFolderTile = page.locator('.folder-tile', { hasText: 'UI Folder Renamed' });
@@ -476,6 +477,7 @@ const verifyLocalWorker = async (scenario) => {
           exact: true,
         });
         await moveFolderButton.click();
+        await page.getByRole('dialog', { name: 'Move Folder' }).waitFor();
         await assertAccessible(page, 'move dialog');
         if (
           !(await page

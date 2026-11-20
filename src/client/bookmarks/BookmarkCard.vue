@@ -9,6 +9,7 @@ const props = defineProps<{
   tags: readonly string[];
   editable: boolean;
   pinWritable: boolean;
+  pending: boolean;
 }>();
 const emit = defineEmits<{
   edit: [];
@@ -24,7 +25,7 @@ const destination = computed(() => new URL(props.bookmark.url));
 const activate = (event: MouseEvent) => {
   if (!props.editable) return;
   event.preventDefault();
-  emit('edit');
+  if (!props.pending) emit('edit');
 };
 </script>
 
@@ -33,10 +34,10 @@ const activate = (event: MouseEvent) => {
     class="bookmark-card-shell"
     :class="{ 'has-pin-control': !editable }"
     :data-bookmark-id="bookmark.id"
-    :draggable="editable"
-    @dragstart="emit('dragstart')"
-    @dragover="editable && $event.preventDefault()"
-    @drop="editable && (emit('drop', $event), $event.preventDefault())"
+    :draggable="editable && !pending"
+    @dragstart="editable && !pending && emit('dragstart')"
+    @dragover="editable && !pending && $event.preventDefault()"
+    @drop="editable && !pending && (emit('drop', $event), $event.preventDefault())"
   >
     <span v-if="editable" class="drag-handle desktop-edit-controls" aria-label="Drag Bookmark"
       >⋮⋮</span
@@ -46,6 +47,7 @@ const activate = (event: MouseEvent) => {
       :href="bookmark.url"
       :data-open-bookmark-id="editable ? undefined : bookmark.id"
       :draggable="editable ? false : undefined"
+      :aria-disabled="editable && pending ? true : undefined"
       @click="activate"
     >
       <BookmarkFavicon :url="bookmark.url" :title="bookmark.title" />
@@ -74,6 +76,7 @@ const activate = (event: MouseEvent) => {
       v-if="editable"
       class="bookmark-edit-button desktop-edit-controls"
       type="button"
+      :disabled="pending"
       :aria-label="`Edit ${bookmark.title}`"
       @click="$emit('edit')"
     >
@@ -83,6 +86,7 @@ const activate = (event: MouseEvent) => {
       v-if="editable"
       class="bookmark-move-button desktop-edit-controls"
       type="button"
+      :disabled="pending"
       :aria-label="`Move ${bookmark.title}`"
       @click="emit('move')"
     >
@@ -92,6 +96,7 @@ const activate = (event: MouseEvent) => {
       v-if="editable"
       class="bookmark-delete-button desktop-edit-controls"
       type="button"
+      :disabled="pending"
       :aria-label="`Move ${bookmark.title} to Trash`"
       @click="emit('remove')"
     >

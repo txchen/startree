@@ -52,6 +52,43 @@ const edit = (session: ReturnType<typeof createNotesSession>, title: string) => 
 };
 
 describe('notes session safety', () => {
+  it('clears older versions only from a saved note and persists the latest revision', async () => {
+    const f = createFixture();
+    await setup(f);
+    try {
+      edit(f.session, 'First title');
+      await f.session.flush();
+      const note = f.session.state.notes[0]!;
+      note.title = 'Saved title';
+      f.session.changed();
+      await f.session.flush();
+      const history = [...note.history!];
+      const revision = f.cloud().revision;
+
+      note.title = 'Unsaved title';
+      f.session.changed();
+      await f.session.clearHistory(note.id);
+      expect(note.history).toEqual(history);
+      expect(f.cloud().revision).toBe(revision);
+
+      await f.session.discardChanges();
+      await f.session.clearHistory(note.id);
+      expect(f.session.state.notes[0]).toMatchObject({
+        title: 'Saved title',
+        history: [history.at(-1)],
+      });
+      expect(f.session.state.unsaved).toBe(false);
+      expect(f.cloud().revision).toBe(revision + 1);
+      const { notes } = await unlockVault(f.cloud().vault, password);
+      expect(notes[0]?.history).toEqual([history.at(-1)]);
+
+      await f.session.clearHistory(note.id);
+      expect(f.cloud().revision).toBe(revision + 1);
+    } finally {
+      await f.session.dispose();
+    }
+  });
+
   it('verifies recovery before setup and clears plaintext on lock', async () => {
     const f = createFixture();
     await f.session.initialize();

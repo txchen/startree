@@ -6,7 +6,7 @@ import {
   type Bookmark,
   type BookmarkFolder,
 } from '../../shared/bookmarks/contracts';
-import type { BookmarkEditorValue } from './bookmark-editor';
+import { bookmarkEditorError, type BookmarkEditorValue } from './bookmark-editor';
 import { trapDialogFocus } from './dialog-focus';
 
 const props = defineProps<{
@@ -38,6 +38,7 @@ const title = ref(props.value.title ?? '');
 const note = ref(props.value.note ?? '');
 const tags = ref(props.value.tags?.join(', ') ?? '');
 const discardPrompt = ref(false);
+const validationError = ref<ReturnType<typeof bookmarkEditorError>>();
 let returnFocus: HTMLElement | null = null;
 const comparableValue = (): BookmarkEditorValue =>
   props.kind === 'folder'
@@ -54,6 +55,13 @@ const comparableValue = (): BookmarkEditorValue =>
 const dirty = computed(
   () => JSON.stringify(comparableValue()) !== JSON.stringify(props.initialValue),
 );
+const invalidField = (field: string) => {
+  const invalid = validationError.value?.field === field;
+  return {
+    'aria-invalid': invalid,
+    'aria-describedby': invalid ? 'bookmark-editor-error' : undefined,
+  };
+};
 const heading = computed(() =>
   props.kind === 'folder'
     ? props.folder
@@ -106,10 +114,29 @@ const addSuggestedTag = (tag: string) => {
 };
 
 const submit = () => {
-  emit('save', comparableValue());
+  if (props.saving) return;
+  const value = comparableValue();
+  const error = bookmarkEditorError(props.kind, value);
+  validationError.value = error;
+  if (error) {
+    void nextTick(() => {
+      (form.value?.elements.namedItem(error.field) as HTMLElement | null)?.focus();
+    });
+    return;
+  }
+  emit('save', value);
 };
 
-watch([name, url, title, note, tags], () => emit('draft', comparableValue()));
+watch([name, url, title, note, tags], () => {
+  const value = comparableValue();
+  if (
+    validationError.value &&
+    bookmarkEditorError(props.kind, value)?.message !== validationError.value.message
+  ) {
+    validationError.value = undefined;
+  }
+  emit('draft', value);
+});
 
 const handleKeydown = (event: KeyboardEvent) => {
   if (event.key === 'Escape') {
@@ -151,10 +178,17 @@ onUnmounted(() => {
         </button>
       </header>
 
-      <form ref="form" @submit.prevent="submit">
+      <form ref="form" novalidate @submit.prevent="submit">
         <label v-if="kind === 'folder'">
           Folder name
-          <input ref="firstInput" v-model="name" required maxlength="256" />
+          <input
+            ref="firstInput"
+            v-model="name"
+            v-bind="invalidField('name')"
+            name="name"
+            required
+            maxlength="256"
+          />
         </label>
         <template v-else>
           <label>
@@ -162,6 +196,8 @@ onUnmounted(() => {
             <input
               ref="firstInput"
               v-model="url"
+              v-bind="invalidField('url')"
+              name="url"
               type="url"
               required
               maxlength="8192"
@@ -187,11 +223,17 @@ onUnmounted(() => {
           </div>
           <label>
             Title
-            <input v-model="title" required maxlength="256" />
+            <input
+              v-model="title"
+              v-bind="invalidField('title')"
+              name="title"
+              required
+              maxlength="256"
+            />
           </label>
           <label>
             Tags <small>Separate Tags with commas.</small>
-            <input ref="tagInput" v-model="tags" />
+            <input ref="tagInput" v-model="tags" v-bind="invalidField('tags')" name="tags" />
           </label>
           <div v-if="availableTagSuggestions.length" class="tag-suggestions">
             <span>Suggestions</span>
@@ -210,6 +252,9 @@ onUnmounted(() => {
           </label>
         </template>
 
+        <p v-if="validationError" id="bookmark-editor-error" class="editor-error" role="alert">
+          {{ validationError.message }}
+        </p>
         <div v-if="discardPrompt" class="discard-prompt" role="alert">
           <p>Discard your unsaved changes?</p>
           <button type="button" @click="discardPrompt = false">Keep editing</button>

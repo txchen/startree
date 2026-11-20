@@ -62,7 +62,7 @@ export const createNotesSession = (
   let savedVersion = 0;
   let durableVersion = 0;
   const fingerprint = (notes: Note[]) =>
-    JSON.stringify(notes.map(({ id, title, body }) => ({ id, title, body })));
+    JSON.stringify(notes.map(({ id, title, body, history }) => [id, title, body, history?.length]));
   let savedContent = '';
   const retainLegacyHistory = (notes: Note[]) =>
     notes.map((note) => ({
@@ -445,6 +445,14 @@ export const createNotesSession = (
       note.title = previous.title;
       note.body = previous.body;
       note.updatedAt = new Date().toISOString();
+      changed();
+      await flush();
+    },
+    async clearHistory(noteId: string) {
+      if (state.phase !== 'unlocked' || state.unsaved || state.saving) return;
+      const note = state.notes.find((item) => item.id === noteId);
+      if (!note?.history || note.history.length < 2) return;
+      note.history = note.history.slice(-1);
       changed();
       await flush();
     },

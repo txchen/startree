@@ -402,6 +402,65 @@ describe('Notes API boundary', () => {
     );
     expect(foreign.status).toBe(403);
   });
+  it('accepts a case-insensitive JSON media type for vault writes', async () => {
+    const write = vi.fn(async () => null);
+    const box = { iv: 'A'.repeat(16), ciphertext: 'A'.repeat(64) };
+    const command = {
+      operationId: crypto.randomUUID(),
+      expectedRevision: 0,
+      vault: {
+        format: 1,
+        id: crypto.randomUUID(),
+        salt: 'A'.repeat(24),
+        iterations: 600_000,
+        passwordKey: box,
+        recoveryKey: box,
+        payload: box,
+      },
+    };
+    const response = await createNotesApp(write).request(
+      'https://startree.example/api/notes/vault',
+      {
+        method: 'PUT',
+        headers: {
+          Origin: 'https://startree.example',
+          'Content-Type': 'Application/JSON; charset=UTF-8',
+        },
+        body: JSON.stringify(command),
+      },
+      bindings,
+    );
+    expect(response.status).toBe(409);
+    expect(await response.json()).toEqual({ error: 'conflict' });
+    expect(write).toHaveBeenCalledWith(command, bindings);
+  });
+
+  it('rejects an oversized vault Content-Length before reading the body', async () => {
+    const write = vi.fn(async () => null);
+    const pull = vi.fn((controller: ReadableStreamDefaultController<Uint8Array>) => {
+      controller.close();
+    });
+    const init: RequestInit & { duplex: 'half' } = {
+      method: 'PUT',
+      headers: {
+        Origin: 'https://startree.example',
+        'Content-Type': 'application/json',
+        'Content-Length': String(1024 * 1024 + 1),
+      },
+      body: new ReadableStream({ pull }, { highWaterMark: 0 }),
+      duplex: 'half',
+    };
+    const response = await createNotesApp(write).request(
+      new Request('https://startree.example/api/notes/vault', init),
+      undefined,
+      bindings,
+    );
+    expect(response.status).toBe(413);
+    expect(await response.json()).toEqual({ error: 'request_too_large' });
+    expect(pull).not.toHaveBeenCalled();
+    expect(write).not.toHaveBeenCalled();
+  });
+
   it('rejects plaintext and oversized payloads before calling persistence', async () => {
     const write = vi.fn(async () => null);
     const app = createNotesApp(write);

@@ -130,6 +130,9 @@ export const verifyShellUpgrade = async () => {
     const olderTab = await page.context().newPage();
     await olderTab.goto(url);
     await olderTab.waitForFunction(() => Boolean(navigator.serviceWorker.controller));
+    await olderTab.evaluate(() => {
+      window.legacyShellWorker = navigator.serviceWorker.controller;
+    });
     upgraded = true;
     const cdp = await page.context().newCDPSession(page);
     await cdp.send('Network.enable');
@@ -141,8 +144,10 @@ export const verifyShellUpgrade = async () => {
       const registration = await navigator.serviceWorker.getRegistration();
       await registration.update();
     });
-    await page.waitForFunction(
-      async () => !(await navigator.serviceWorker.getRegistration())?.installing,
+    await olderTab.waitForFunction(
+      () =>
+        navigator.serviceWorker.controller?.state === 'activated' &&
+        navigator.serviceWorker.controller !== window.legacyShellWorker,
     );
     await cdp.send('Network.setBypassServiceWorker', { bypass: false });
     await page.reload();

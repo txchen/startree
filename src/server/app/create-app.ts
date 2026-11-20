@@ -30,6 +30,14 @@ type AppServices<Bindings> = {
 
 const MAX_COMMAND_BYTES = 1024 * 1024;
 
+const requestMediaType = (request: Request) =>
+  request.headers.get('Content-Type')?.split(';', 1)[0]?.trim().toLowerCase();
+
+const commandTooLarge = (request: Request) => {
+  const declaredLength = Number(request.headers.get('Content-Length'));
+  return Number.isFinite(declaredLength) && declaredLength > MAX_COMMAND_BYTES;
+};
+
 const readBoundedCommandBody = async (request: Request): Promise<string | null> => {
   if (!request.body) return '';
   const reader = request.body.getReader();
@@ -94,8 +102,7 @@ export const createApp = <Bindings extends CoreBindings>(services: AppServices<B
   });
 
   app.post('/api/bookmarks/commands', async (context) => {
-    const contentType = context.req.header('Content-Type')?.split(';', 1)[0]?.trim().toLowerCase();
-    if (contentType !== 'application/json') {
+    if (requestMediaType(context.req.raw) !== 'application/json') {
       return errorResponse(
         context,
         415,
@@ -137,8 +144,7 @@ export const createApp = <Bindings extends CoreBindings>(services: AppServices<B
       );
     }
 
-    const declaredLength = Number(context.req.header('Content-Length') ?? '0');
-    if (Number.isFinite(declaredLength) && declaredLength > MAX_COMMAND_BYTES) {
+    if (commandTooLarge(context.req.raw)) {
       return errorResponse(
         context,
         413,
@@ -230,11 +236,22 @@ export const createApp = <Bindings extends CoreBindings>(services: AppServices<B
   app.put('/api/notes/vault', async (context) => {
     if (context.req.header('Origin') !== new URL(context.req.url).origin)
       return context.json({ error: 'invalid_origin' }, 403);
-    if (context.req.header('Content-Type')?.split(';')[0]?.trim() !== 'application/json')
+    if (requestMediaType(context.req.raw) !== 'application/json')
       return context.json({ error: 'unsupported_media_type' }, 415);
     if (!(await context.env.MUTATION_RATE_LIMITER.limit({ key: 'owner' })).success) {
       context.header('Retry-After', '60');
+      console.warn(
+        JSON.stringify({
+          event: 'notes_vault_write',
+          outcome: 'rate_limited',
+          requestId: requestIdFor(context),
+          version: context.env.APP_VERSION,
+        }),
+      );
       return context.json({ error: 'rate_limited' }, 429);
+    }
+    if (commandTooLarge(context.req.raw)) {
+      return context.json({ error: 'request_too_large' }, 413);
     }
     const body = await readBoundedCommandBody(context.req.raw);
     if (body === null) return context.json({ error: 'request_too_large' }, 413);
@@ -248,6 +265,15 @@ export const createApp = <Bindings extends CoreBindings>(services: AppServices<B
     if (!command.success) return context.json({ error: 'invalid_vault' }, 400);
     if (!services.writeNotesVault) return context.json({ error: 'unavailable' }, 503);
     const result = await services.writeNotesVault(command.output, context.env);
+    console.log(
+      JSON.stringify({
+        event: 'notes_vault_write',
+        outcome: result ? 'acknowledged' : 'conflict',
+        operationId: command.output.operationId,
+        requestId: requestIdFor(context),
+        version: context.env.APP_VERSION,
+      }),
+    );
     return result ? context.json({ vault: result }) : context.json({ error: 'conflict' }, 409);
   });
 

@@ -13,7 +13,7 @@ watch(origin, () => {
 <template>
   <span class="bookmark-favicon" aria-hidden="true">
     <img
-      v-if="!failed"
+      v-if="!failed && origin.startsWith('https:')"
       :key="origin"
       :src="`${origin}/favicon.ico`"
       alt=""

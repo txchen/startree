@@ -163,6 +163,12 @@ const restore = async () => {
   await session.restore(current.value.id, previewRevision.value);
   if (!state.unsaved && !state.error) historyOpen.value = false;
 };
+const clearHistory = async () => {
+  const note = current.value;
+  if (!note || !window.confirm('Permanently remove older versions of this note?')) return;
+  await session.clearHistory(note.id);
+  if (current.value?.id === note.id) previewRevision.value = note.history?.at(-1)?.revision;
+};
 watch(
   () => current.value?.id,
   () => {
@@ -654,6 +660,13 @@ onUnmounted(() => {
                 </button>
                 <small v-if="state.unsaved">Save or discard your edits before restoring.</small>
               </template>
+              <button
+                type="button"
+                :disabled="(current.history?.length ?? 0) < 2 || state.unsaved || state.saving"
+                @click="clearHistory"
+              >
+                Clear older versions
+              </button>
             </div>
             <input
               v-model="current.title"

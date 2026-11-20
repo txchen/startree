@@ -1,5 +1,14 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, onUnmounted, ref, shallowRef, watch } from 'vue';
+import {
+  computed,
+  defineAsyncComponent,
+  nextTick,
+  onMounted,
+  onUnmounted,
+  ref,
+  shallowRef,
+  watch,
+} from 'vue';
 
 import { SYSTEM_ROOT_FOLDER_ID } from '../../shared/bookmarks/contracts';
 import type {
@@ -12,7 +21,6 @@ import BookmarkCard from './BookmarkCard.vue';
 import PinnedBookmarks from './PinnedBookmarks.vue';
 import RecentBookmarks from './RecentBookmarks.vue';
 import { createRecentBookmarks } from './recent-bookmarks';
-import BookmarkEditorModal from './BookmarkEditorModal.vue';
 import type { BookmarkEditorValue } from './bookmark-editor';
 import {
   createBroadcastBookmarkRevisionChannel,
@@ -38,6 +46,11 @@ import { createBookmarkState, type BookmarkStateView } from './bookmark-state';
 import { trapDialogFocus } from './dialog-focus';
 import FolderNavigation from './FolderNavigation.vue';
 
+const BookmarkEditorModal = defineAsyncComponent(() => import('./BookmarkEditorModal.vue'));
+const BookmarkMoveModal = defineAsyncComponent(() => import('./BookmarkMoveModal.vue'));
+const BookmarksDuplicatesView = defineAsyncComponent(() => import('./BookmarksDuplicatesView.vue'));
+const BookmarksTrashView = defineAsyncComponent(() => import('./BookmarksTrashView.vue'));
+
 const props = defineProps<{ legacyFolderId?: string }>();
 const emit = defineEmits<{ canonicalize: [] }>();
 const SIDEBAR_WIDTH_STORAGE_KEY = 'startree-folder-sidebar-width';
@@ -50,7 +63,6 @@ const mobileFolderButton = ref<HTMLButtonElement>();
 const drawerCloseButton = ref<HTMLButtonElement>();
 const initialized = ref(false);
 const searchInput = ref<HTMLInputElement>();
-const moveDestinationInput = ref<HTMLSelectElement>();
 const selectedSearchResult = ref(0);
 const searchFiltersOpen = ref(false);
 const selectedTagFacet = ref('');
@@ -144,9 +156,8 @@ const searchOpen = computed(
 const editingAvailable = computed(
   () => desktopEditingAvailable.value && state.value.syncStatus !== 'offline',
 );
-const pinWritable = computed(
-  () => state.value.syncStatus !== 'offline' && state.value.writeStatus !== 'pending',
-);
+const mutationPending = computed(() => state.value.writeStatus === 'pending');
+const pinWritable = computed(() => state.value.syncStatus !== 'offline' && !mutationPending.value);
 const pinnedBookmarks = computed(() =>
   library.value.bookmarks
     .filter((bookmark) => bookmark.pinRank)
@@ -369,6 +380,7 @@ const handleGlobalKeydown = (event: KeyboardEvent) => {
   if (
     addBookmarkShortcut &&
     editingAvailable.value &&
+    !mutationPending.value &&
     !editor.value &&
     !moveEditor.value &&
     !trashOpen.value &&
@@ -396,6 +408,7 @@ const sequenceFor = (folderId: string) =>
   state.value.sequences.find((sequence) => sequence.folderId === folderId);
 
 const reorderFolder = async (folderId: string, beforeFolderId?: string) => {
+  if (mutationPending.value) return;
   const folder = library.value.foldersById.get(folderId);
   if (!folder?.parentId || folder.id === beforeFolderId) return null;
   const sequence = sequenceFor(folder.parentId);
@@ -412,6 +425,7 @@ const reorderFolder = async (folderId: string, beforeFolderId?: string) => {
 };
 
 const reorderBookmark = async (bookmarkId: string, beforeBookmarkId?: string) => {
+  if (mutationPending.value) return;
   const bookmark = library.value.bookmarksById.get(bookmarkId);
   if (!bookmark || bookmark.id === beforeBookmarkId) return null;
   const sequence = sequenceFor(bookmark.folderId);
@@ -474,7 +488,6 @@ const openMoveEditor = (kind: 'folder' | 'bookmark', id: string) => {
   moveEditor.value = { kind, id };
   moveDestinationId.value = state.value.selectedFolder?.id ?? SYSTEM_ROOT_FOLDER_ID;
   moveBeforeId.value = '';
-  void nextTick(() => moveDestinationInput.value?.focus());
 };
 
 const closeMoveEditor = () => {
@@ -564,6 +577,7 @@ const moveEditorModel = computed(() => {
 });
 
 const saveMove = async () => {
+  if (mutationPending.value) return;
   const result = await moveEditorModel.value?.execute();
   if (result?.status === 'acknowledged') closeMoveEditor();
 };
@@ -597,6 +611,7 @@ const closeEditor = () => {
 };
 
 const saveEditor = async (value: BookmarkEditorValue) => {
+  if (mutationPending.value) return;
   const activeEditor = editor.value;
   const selectedFolder = state.value.selectedFolder;
   if (!activeEditor || !selectedFolder) return;
@@ -660,19 +675,11 @@ const openTrash = async () => {
   await stateModule.loadTrash();
 };
 
-const closeTrash = () => {
-  trashOpen.value = false;
-};
-
 const openDuplicates = async () => {
   duplicatesOpen.value = true;
   trashOpen.value = false;
   editMode.value = false;
   await closeSearch();
-};
-
-const closeDuplicates = () => {
-  duplicatesOpen.value = false;
 };
 
 const revealExistingBookmark = async (bookmark: Bookmark) => {
@@ -696,6 +703,7 @@ const clearUndoableTrash = (rootId?: string) => {
 };
 
 const trashBookmark = async (bookmark: Bookmark) => {
+  if (mutationPending.value) return;
   const sequence = sequenceFor(bookmark.folderId);
   if (!sequence) return;
   const result = await stateModule.executeCommand({
@@ -739,6 +747,7 @@ const folderSubtreeCounts = (folderId: string) => {
 };
 
 const trashFolder = async (folder: BookmarkFolder) => {
+  if (mutationPending.value) return;
   if (!folder.parentId) return;
   const sequence = sequenceFor(folder.parentId);
   if (!sequence) return;
@@ -772,39 +781,19 @@ const trashFolder = async (folder: BookmarkFolder) => {
   }
 };
 
-const trashRootDetails = (root: BookmarkTrashRoot) => {
-  if (root.kind === 'folder') {
-    const record = state.value.trash?.folders.find((folder) => folder.id === root.id);
-    return {
-      version: record?.version,
-      name: record?.name,
-      typeLabel: 'Folder tree',
-      destinationSequenceVersion: (sequence: NonNullable<ReturnType<typeof sequenceFor>>) =>
-        sequence.folderVersion,
-    };
-  }
-  const record = state.value.trash?.bookmarks.find((bookmark) => bookmark.id === root.id);
-  return {
-    version: record?.version,
-    name: record?.title,
-    typeLabel: 'Bookmark',
-    destinationSequenceVersion: (sequence: NonNullable<ReturnType<typeof sequenceFor>>) =>
-      sequence.bookmarkVersion,
-  };
-};
-
-const trashEntries = computed(() =>
-  (state.value.trash?.roots ?? []).map((root) => ({ root, ...trashRootDetails(root) })),
-);
+const trashRootVersion = (root: BookmarkTrashRoot) =>
+  (root.kind === 'folder' ? state.value.trash?.folders : state.value.trash?.bookmarks)?.find(
+    (item) => item.id === root.id,
+  )?.version;
 
 const restoreTrashRoot = async (root: BookmarkTrashRoot) => {
+  if (mutationPending.value) return;
   const activeParent = library.value.foldersById.has(root.originalParentId)
     ? root.originalParentId
     : SYSTEM_ROOT_FOLDER_ID;
   const sequence = sequenceFor(activeParent);
-  const details = trashRootDetails(root);
   const version =
-    details.version ??
+    trashRootVersion(root) ??
     (undoableTrash.value?.root.id === root.id ? undoableTrash.value.version : null);
   if (!sequence || !version) return;
   const result = await stateModule.executeCommand({
@@ -813,13 +802,15 @@ const restoreTrashRoot = async (root: BookmarkTrashRoot) => {
     rootKind: root.kind,
     rootId: root.id,
     rootVersion: version,
-    expectedDestinationSequenceVersion: details.destinationSequenceVersion(sequence),
+    expectedDestinationSequenceVersion:
+      root.kind === 'folder' ? sequence.folderVersion : sequence.bookmarkVersion,
   });
   if (result?.status === 'acknowledged') clearUndoableTrash(root.id);
 };
 
 const purgeTrashRoot = async (root: BookmarkTrashRoot) => {
-  const version = trashRootDetails(root).version;
+  if (mutationPending.value) return;
+  const version = trashRootVersion(root);
   if (
     !version ||
     !window.confirm(
@@ -838,6 +829,7 @@ const purgeTrashRoot = async (root: BookmarkTrashRoot) => {
 };
 
 const emptyTrash = async () => {
+  if (mutationPending.value) return;
   if (
     !state.value.trash ||
     !window.confirm(
@@ -956,7 +948,13 @@ onUnmounted(() => {
       <p v-if="state.notice" class="navigation-notice" role="status">{{ state.notice }}</p>
       <div v-if="undoableTrash" class="undo-notice" role="status">
         <span>Moved to Trash.</span>
-        <button type="button" @click="restoreTrashRoot(undoableTrash.root)">Undo</button>
+        <button
+          type="button"
+          :disabled="mutationPending"
+          @click="restoreTrashRoot(undoableTrash.root)"
+        >
+          Undo
+        </button>
       </div>
 
       <div
@@ -1161,96 +1159,32 @@ onUnmounted(() => {
         </div>
       </div>
 
-      <section v-if="duplicatesOpen" class="duplicates-view" aria-labelledby="bookmarks-title">
-        <header class="library-heading">
-          <div>
-            <span class="eyebrow">Library maintenance</span>
-            <h1 id="bookmarks-title">Duplicate Bookmarks</h1>
-          </div>
-          <button type="button" @click="closeDuplicates">Back to Bookmarks</button>
-        </header>
-        <div v-if="!duplicateGroups.length" class="library-state empty">
-          <h2>No duplicate URLs</h2>
-          <p>Every active Bookmark currently has a distinct exact URL.</p>
-        </div>
-        <div v-else class="duplicate-groups">
-          <article v-for="group in duplicateGroups" :key="group.url" class="duplicate-group">
-            <header>
-              <strong>{{ group.url }}</strong>
-              <span>{{ group.bookmarks.length }} Bookmarks</span>
-            </header>
-            <ul>
-              <li v-for="bookmark in group.bookmarks" :key="bookmark.id">
-                <div>
-                  <strong>{{ bookmark.title }}</strong>
-                  <small>{{ folderPathFor(bookmark.folderId) }}</small>
-                  <small>
-                    Added {{ formatSyncTime(bookmark.createdAt) }}
-                    <template v-if="state.tagsByBookmark[bookmark.id]?.length">
-                      · {{ state.tagsByBookmark[bookmark.id]?.join(', ') }}
-                    </template>
-                  </small>
-                  <p v-if="bookmark.note">{{ bookmark.note }}</p>
-                </div>
-                <button v-if="editingAvailable" type="button" @click="trashBookmark(bookmark)">
-                  Move to Trash
-                </button>
-              </li>
-            </ul>
-          </article>
-        </div>
-      </section>
-
-      <section v-else-if="trashOpen" class="trash-view" aria-labelledby="bookmarks-title">
-        <header class="library-heading">
-          <h1 id="bookmarks-title">Trash</h1>
-          <div class="trash-actions">
-            <button type="button" @click="closeTrash">Back to Bookmarks</button>
-            <button
-              v-if="editingAvailable && state.trash?.roots.length"
-              type="button"
-              @click="emptyTrash"
-            >
-              Empty Trash
-            </button>
-          </div>
-        </header>
-        <div v-if="state.trashStatus === 'offline'" class="library-state empty">
-          <h2>Trash is online only</h2>
-          <p>
-            Reconnect to review or change authoritative Trash. Offline snapshots do not include it.
-          </p>
-        </div>
-        <div v-else-if="state.trashStatus === 'loading'" class="library-state empty">
-          <p>Loading Trash…</p>
-        </div>
-        <div v-else-if="state.trashStatus === 'failed'" class="library-state empty">
-          <h2>Trash could not be loaded</h2>
-          <button type="button" @click="stateModule.loadTrash()">Try again</button>
-        </div>
-        <div v-else-if="!state.trash?.roots.length" class="library-state empty">
-          <h2>Trash is empty</h2>
-          <p>Deleted Bookmarks and Folder trees will appear here for 30 days.</p>
-        </div>
-        <ul v-else class="trash-list">
-          <li v-for="entry in trashEntries" :key="`${entry.root.kind}:${entry.root.id}`">
-            <div>
-              <strong>{{ entry.name }}</strong>
-              <small
-                >{{ entry.typeLabel }} · Deleted {{ formatSyncTime(entry.root.deletedAt) }}</small
-              >
-            </div>
-            <div v-if="editingAvailable">
-              <button type="button" @click="restoreTrashRoot(entry.root)">Restore</button
-              ><button type="button" @click="purgeTrashRoot(entry.root)">Delete permanently</button>
-            </div>
-          </li>
-        </ul>
-        <p v-if="state.trash?.roots.length" class="deletion-promise">
-          Permanent deletion removes authoritative D1 records and future responses. It cannot erase
-          disconnected browser snapshots or Owner-managed exports.
-        </p>
-      </section>
+      <BookmarksDuplicatesView
+        v-if="duplicatesOpen"
+        :groups="duplicateGroups"
+        :folder-paths="folderPaths"
+        :tags-by-bookmark="state.tagsByBookmark"
+        :editable="editingAvailable"
+        :pending="mutationPending"
+        :format-sync-time="formatSyncTime"
+        @close="duplicatesOpen = false"
+        @show="revealExistingBookmark"
+        @trash="trashBookmark"
+      />
+      <BookmarksTrashView
+        v-else-if="trashOpen"
+        :trash="state.trash"
+        :status="state.trashStatus"
+        :active-folders="library.folders"
+        :editable="editingAvailable"
+        :pending="mutationPending"
+        :format-sync-time="formatSyncTime"
+        @close="trashOpen = false"
+        @empty="emptyTrash"
+        @retry="stateModule.loadTrash()"
+        @restore="restoreTrashRoot"
+        @purge="purgeTrashRoot"
+      />
 
       <div
         v-else-if="state.status === 'loading' && !state.coldLoadProgressVisible"
@@ -1318,17 +1252,34 @@ onUnmounted(() => {
               {{ state.directBookmarks.length }} Bookmarks
             </span>
             <div v-if="editingAvailable && !editMode" class="desktop-edit-controls">
-              <button type="button" title="Keyboard shortcut: N" @click="openBookmarkEditor()">
+              <button
+                type="button"
+                title="Keyboard shortcut: N"
+                :disabled="mutationPending"
+                @click="openBookmarkEditor()"
+              >
                 Add Bookmark
               </button>
-              <button class="edit-mode-button" type="button" @click="editMode = true">Edit</button>
+              <button
+                class="edit-mode-button"
+                type="button"
+                :disabled="mutationPending"
+                @click="editMode = true"
+              >
+                Edit
+              </button>
             </div>
             <div v-else-if="editingAvailable" class="desktop-edit-controls">
-              <button type="button" @click="openFolderEditor()">New Folder</button>
-              <button type="button" @click="openBookmarkEditor()">Add Bookmark</button>
+              <button type="button" :disabled="mutationPending" @click="openFolderEditor()">
+                New Folder
+              </button>
+              <button type="button" :disabled="mutationPending" @click="openBookmarkEditor()">
+                Add Bookmark
+              </button>
               <button
                 v-if="state.selectedFolder && state.selectedFolder.id !== SYSTEM_ROOT_FOLDER_ID"
                 type="button"
+                :disabled="mutationPending"
                 @click="openFolderEditor(state.selectedFolder)"
               >
                 Edit Folder
@@ -1336,6 +1287,7 @@ onUnmounted(() => {
               <button
                 v-if="state.selectedFolder && state.selectedFolder.id !== SYSTEM_ROOT_FOLDER_ID"
                 type="button"
+                :disabled="mutationPending"
                 @click="trashFolder(state.selectedFolder)"
               >
                 Trash Folder
@@ -1357,12 +1309,15 @@ onUnmounted(() => {
               :key="folder.id"
               class="folder-tile"
               :data-folder-id="folder.id"
-              :draggable="editingAvailable && editMode"
-              @dragstart="dragged = { kind: 'folder', id: folder.id, index }"
-              @dragover="editingAvailable && editMode && $event.preventDefault()"
+              :draggable="editingAvailable && editMode && !mutationPending"
+              @dragstart="!mutationPending && (dragged = { kind: 'folder', id: folder.id, index })"
+              @dragover="
+                editingAvailable && editMode && !mutationPending && $event.preventDefault()
+              "
               @drop="
                 editingAvailable &&
                 editMode &&
+                !mutationPending &&
                 (dropFolder(folder.id, index, nextSiblingId($event, 'folderId')),
                 $event.preventDefault())
               "
@@ -1384,6 +1339,7 @@ onUnmounted(() => {
                 class="tile-edit desktop-edit-controls"
                 type="button"
                 :aria-label="`Edit ${folder.name}`"
+                :disabled="mutationPending"
                 @click="openFolderEditor(folder)"
               >
                 Edit
@@ -1393,6 +1349,7 @@ onUnmounted(() => {
                 class="tile-move desktop-edit-controls"
                 type="button"
                 :aria-label="`Move ${folder.name}`"
+                :disabled="mutationPending"
                 @click="openMoveEditor('folder', folder.id)"
               >
                 Move
@@ -1402,6 +1359,7 @@ onUnmounted(() => {
                 class="tile-delete desktop-edit-controls"
                 type="button"
                 :aria-label="`Move ${folder.name} to Trash`"
+                :disabled="mutationPending"
                 @click="trashFolder(folder)"
               >
                 Trash
@@ -1410,11 +1368,8 @@ onUnmounted(() => {
             <div
               v-if="editingAvailable && editMode"
               class="drop-at-end desktop-edit-controls"
-              @dragover.prevent
-              @drop="
-                dropFolder();
-                $event.preventDefault();
-              "
+              @dragover="!mutationPending && $event.preventDefault()"
+              @drop="!mutationPending && (dropFolder(), $event.preventDefault())"
             >
               Drop to place last
             </div>
@@ -1435,6 +1390,7 @@ onUnmounted(() => {
               :tags="state.tagsByBookmark[bookmark.id] ?? []"
               :editable="editingAvailable && editMode"
               :pin-writable="pinWritable"
+              :pending="mutationPending"
               @pin="setBookmarkPin(bookmark.id, !bookmark.pinRank)"
               @edit="openBookmarkEditor(bookmark)"
               @move="openMoveEditor('bookmark', bookmark.id)"
@@ -1445,11 +1401,8 @@ onUnmounted(() => {
             <div
               v-if="editingAvailable && editMode"
               class="drop-at-end desktop-edit-controls"
-              @dragover.prevent
-              @drop="
-                dropBookmark();
-                $event.preventDefault();
-              "
+              @dragover="!mutationPending && $event.preventDefault()"
+              @drop="!mutationPending && (dropBookmark(), $event.preventDefault())"
             >
               Drop to place last
             </div>
@@ -1539,7 +1492,7 @@ onUnmounted(() => {
       :bookmark="editor.bookmark"
       :value="editorDraft"
       :initial-value="editorInitialValue"
-      :saving="state.writeStatus === 'pending'"
+      :saving="mutationPending"
       :destination-folder-name="state.selectedFolder?.name || 'Bookmarks'"
       :duplicate-bookmarks="editorDuplicateBookmarks"
       :duplicate-locations="duplicateLocations"
@@ -1550,50 +1503,16 @@ onUnmounted(() => {
       @save="saveEditor"
     />
 
-    <div
-      v-if="moveEditor && editingAvailable && editMode"
-      class="move-backdrop"
-      @click.self="closeMoveEditor"
-    >
-      <div
-        class="move-dialog"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="move-title"
-        @keydown="trapDialogFocus"
-        @keydown.esc.prevent="closeMoveEditor"
-      >
-        <h2 id="move-title">Move {{ moveEditorModel?.noun }}</h2>
-        <label>
-          Destination Folder
-          <select
-            ref="moveDestinationInput"
-            v-model="moveDestinationId"
-            @change="moveBeforeId = ''"
-          >
-            <option
-              v-for="folder in moveEditorModel?.destinations"
-              :key="folder.id"
-              :value="folder.id"
-            >
-              {{ folder.name || 'Bookmarks' }}
-            </option>
-          </select>
-        </label>
-        <label>
-          Position
-          <select v-model="moveBeforeId">
-            <option value="">Append after existing items</option>
-            <option v-for="item in moveEditorModel?.positions" :key="item.id" :value="item.id">
-              Before {{ item.label }}
-            </option>
-          </select>
-        </label>
-        <div class="move-dialog-actions">
-          <button type="button" @click="closeMoveEditor">Cancel</button>
-          <button type="button" @click="saveMove">Move</button>
-        </div>
-      </div>
-    </div>
+    <BookmarkMoveModal
+      v-if="moveEditorModel && editingAvailable && editMode"
+      v-model:destination-id="moveDestinationId"
+      v-model:before-id="moveBeforeId"
+      :noun="moveEditorModel.noun"
+      :destinations="moveEditorModel.destinations"
+      :positions="moveEditorModel.positions"
+      :pending="mutationPending"
+      @close="closeMoveEditor"
+      @save="saveMove"
+    />
   </section>
 </template>
