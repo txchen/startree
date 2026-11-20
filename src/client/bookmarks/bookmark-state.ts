@@ -76,6 +76,10 @@ export type BookmarkStateView = Readonly<{
   selectedFolder: BookmarkFolder | null;
   folders: readonly BookmarkFolder[];
   bookmarks: readonly Bookmark[];
+  foldersById: ReadonlyMap<string, BookmarkFolder>;
+  foldersByParent: ReadonlyMap<string, readonly BookmarkFolder[]>;
+  bookmarksByFolder: ReadonlyMap<string, readonly Bookmark[]>;
+  bookmarksById: ReadonlyMap<string, Bookmark>;
   breadcrumbs: readonly BookmarkFolder[];
   directFolders: readonly BookmarkFolder[];
   directBookmarks: readonly Bookmark[];
@@ -183,39 +187,72 @@ const rootDisplayFolder = (folder: BookmarkFolder): BookmarkFolder => ({
   name: 'Bookmarks',
 });
 
+const groupByFolder = <Item extends { id: string; rank: string }>(
+  items: Item[],
+  folderIdFor: (item: Item) => string | null,
+): Map<string, Item[]> => {
+  const groups = new Map<string, Item[]>();
+  for (const item of items) {
+    const folderId = folderIdFor(item);
+    if (folderId === null) continue;
+    const children = groups.get(folderId);
+    if (children) children.push(item);
+    else groups.set(folderId, [item]);
+  }
+  for (const children of groups.values()) children.sort(byRank);
+  return groups;
+};
+
+const indexSnapshot = (snapshot?: BookmarkSnapshot) => {
+  const folders = snapshot?.folders ?? [];
+  const bookmarks = snapshot?.bookmarks ?? [];
+  const tagsByBookmark: Record<string, string[]> = {};
+  for (const tag of snapshot?.tags ?? []) {
+    (tagsByBookmark[tag.bookmarkId] ??= []).push(tag.value);
+  }
+  return {
+    folders,
+    bookmarks,
+    foldersById: new Map(folders.map((folder) => [folder.id, folder])),
+    foldersByParent: groupByFolder(folders, (folder) => folder.parentId),
+    bookmarksById: new Map(bookmarks.map((bookmark) => [bookmark.id, bookmark])),
+    bookmarksByFolder: groupByFolder(bookmarks, (bookmark) => bookmark.folderId),
+    tagsByBookmark,
+  };
+};
+
+const emptyIndexes = indexSnapshot();
+const snapshotIndexes = new WeakMap<BookmarkSnapshot, ReturnType<typeof indexSnapshot>>();
+const indexesFor = (snapshot: BookmarkSnapshot | null) => {
+  if (!snapshot) return emptyIndexes;
+  let indexes = snapshotIndexes.get(snapshot);
+  if (!indexes) {
+    indexes = indexSnapshot(snapshot);
+    snapshotIndexes.set(snapshot, indexes);
+  }
+  return indexes;
+};
+
 const viewFor = (state: MutableState): BookmarkStateView => {
-  const folders = state.snapshot?.folders ?? [];
-  const selectedFolder = folders.find((folder) => folder.id === state.selectedFolderId) ?? null;
+  const indexes = indexesFor(state.snapshot);
+  const { foldersById, foldersByParent, bookmarksByFolder } = indexes;
+  const selectedFolder = foldersById.get(state.selectedFolderId) ?? null;
   const breadcrumbs: BookmarkFolder[] = [];
   let cursor = selectedFolder;
   while (cursor) {
     breadcrumbs.unshift(cursor.parentId === null ? rootDisplayFolder(cursor) : cursor);
-    const parentId: string | null = cursor.parentId;
-    cursor = parentId ? (folders.find((folder) => folder.id === parentId) ?? null) : null;
-  }
-
-  const tagsByBookmark: Record<string, string[]> = {};
-  for (const tag of state.snapshot?.tags ?? []) {
-    (tagsByBookmark[tag.bookmarkId] ??= []).push(tag.value);
+    cursor = cursor.parentId ? (foldersById.get(cursor.parentId) ?? null) : null;
   }
 
   return {
+    ...indexes,
     status: state.status,
     snapshotRevision: state.snapshot?.revision ?? null,
     selectedFolder,
-    folders,
-    bookmarks: state.snapshot?.bookmarks ?? [],
     breadcrumbs,
-    directFolders: selectedFolder
-      ? folders.filter((folder) => folder.parentId === selectedFolder.id).sort(byRank)
-      : [],
-    directBookmarks: selectedFolder
-      ? (state.snapshot?.bookmarks ?? [])
-          .filter((bookmark) => bookmark.folderId === selectedFolder.id)
-          .sort(byRank)
-      : [],
+    directFolders: selectedFolder ? (foldersByParent.get(selectedFolder.id) ?? []) : [],
+    directBookmarks: selectedFolder ? (bookmarksByFolder.get(selectedFolder.id) ?? []) : [],
     sequences: state.snapshot?.sequences ?? [],
-    tagsByBookmark,
     expandedFolderIds: state.expandedFolderIds,
     notice: state.notice,
     syncStatus: state.syncStatus,
@@ -737,6 +774,7 @@ export const createBookmarkState = (adapters: {
       state.writeMessage = null;
       adapters.revisionChannel?.announce(result.revision);
       if (
+        state.trash !== null &&
         ['trashBookmark', 'trashFolder', 'restoreTrash', 'purgeTrash', 'emptyTrash'].includes(
           command.type,
         )

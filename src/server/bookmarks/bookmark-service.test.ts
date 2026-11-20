@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { SYSTEM_ROOT_FOLDER_ID } from '../../shared/bookmarks/contracts';
 import { createBookmarkService } from './bookmark-service';
@@ -409,6 +409,93 @@ describe('Bookmark Service Interface', () => {
     expect((await service.getSnapshot()).bookmarks).toHaveLength(2);
   });
 
+  it.each(['a', 'az', 'zzzzzzzzzzzz'])(
+    'appends consecutive Bookmarks with bounded ranks after %s',
+    async (legacyRank) => {
+      await database
+        .prepare(
+          `INSERT INTO bookmarks (id, folder_id, url, title, rank, created_at, modified_at)
+           VALUES (?, ?, 'https://example.com', 'Legacy', ?, ?, ?)`,
+        )
+        .bind(crypto.randomUUID(), SYSTEM_ROOT_FOLDER_ID, legacyRank, now, now)
+        .run();
+      const service = createBookmarkService(database, { now: () => new Date(now) });
+      let previous = legacyRank;
+      const ranks = [legacyRank];
+      for (let index = 0; index < 128; index += 1) {
+        const result = await service.executeCommand({
+          type: 'createBookmark',
+          operationId: crypto.randomUUID(),
+          folderId: SYSTEM_ROOT_FOLDER_ID,
+          expectedBookmarkSequenceVersion: index + 1,
+          url: `https://example.com/${index}`,
+          note: '',
+          tags: [],
+        });
+        expect(result.status).toBe('acknowledged');
+        const rank = result.bookmarks[0]!.rank;
+        expect(rank > previous).toBe(true);
+        expect(rank.length).toBeLessThanOrEqual(legacyRank === 'zzzzzzzzzzzz' ? 24 : 12);
+        ranks.push(rank);
+        previous = rank;
+      }
+      expect((await service.getSnapshot()).bookmarks.map((bookmark) => bookmark.rank)).toEqual(
+        ranks,
+      );
+    },
+  );
+
+  it('prunes expired result batches and reuses expired operation IDs while keeping valid replays', async () => {
+    let clock = now;
+    const service = createBookmarkService(database, { now: () => new Date(clock) });
+    const command = {
+      type: 'createFolder' as const,
+      operationId: crypto.randomUUID(),
+      parentId: SYSTEM_ROOT_FOLDER_ID,
+      expectedFolderSequenceVersion: 1,
+      name: 'Original',
+    };
+    const original = await service.executeCommand(command);
+    clock = '2026-08-19T12:00:00.000Z';
+    const liveCommand = {
+      ...command,
+      operationId: crypto.randomUUID(),
+      expectedFolderSequenceVersion: 2,
+      name: 'Still replayable',
+    };
+    const live = await service.executeCommand(liveCommand);
+    expect(await service.executeCommand(command)).toEqual(original);
+    await database
+      .prepare(
+        `WITH RECURSIVE rows(n) AS (SELECT 1 UNION ALL SELECT n + 1 FROM rows WHERE n < 201)
+         INSERT INTO bookmark_idempotency_results
+           (operation_id, command_type, result_json, created_at, expires_at)
+         SELECT 'expired-' || n, 'createFolder', '{}', ?, ? FROM rows`,
+      )
+      .bind(now, now)
+      .run();
+
+    clock = '2026-08-25T12:00:00.000Z';
+    await expect(service.expireTrash()).resolves.toBe(0);
+    expect((await service.getSnapshot()).revision).toBe(2);
+    const count = () =>
+      database.prepare('SELECT COUNT(*) AS count FROM bookmark_idempotency_results').first();
+    await expect(count()).resolves.toEqual({ count: 3 });
+
+    const replaced = await service.executeCommand({
+      ...command,
+      expectedFolderSequenceVersion: 3,
+      name: 'Reused ID',
+    });
+    expect(replaced).toMatchObject({
+      status: 'acknowledged',
+      revision: 3,
+      folders: [{ name: 'Reused ID' }],
+    });
+    await expect(count()).resolves.toEqual({ count: 2 });
+    expect(await service.executeCommand(liveCommand)).toEqual(live);
+  });
+
   it('rolls back entity, sequence, revision, and idempotency changes when a command batch fails', async () => {
     const service = createBookmarkService(database, {
       now: () => new Date(now),
@@ -559,6 +646,9 @@ describe('Bookmark Service Interface', () => {
           )
           .bind(id, folderId, title, rank, now, now),
       ),
+      ...[bookmarkA, bookmarkB, destinationBookmark].map((id) =>
+        database.prepare("INSERT INTO bookmark_tags VALUES (?, 'Reference', 'reference')").bind(id),
+      ),
     ]);
     const service = createBookmarkService(database, { now: () => new Date(now) });
 
@@ -571,7 +661,7 @@ describe('Bookmark Service Interface', () => {
       expectedFolderSequenceVersion: 1,
       beforeFolderId: folderA,
     });
-    await service.executeCommand({
+    const movedFolder = await service.executeCommand({
       type: 'moveFolder',
       operationId: 'b0000000-0000-4000-8000-000000000002',
       folderId: folderA,
@@ -613,8 +703,14 @@ describe('Bookmark Service Interface', () => {
         .filter((bookmark) => bookmark.folderId === destination)
         .map((bookmark) => bookmark.title),
     ).toEqual(['B Bookmark', 'Destination Bookmark']);
+    expect(movedFolder).toMatchObject({
+      status: 'acknowledged',
+      folders: [{ id: folderA, parentId: destination, version: 2 }],
+    });
     expect(movedBookmark).toMatchObject({
       status: 'acknowledged',
+      bookmarks: [{ id: bookmarkB, folderId: destination, version: 2 }],
+      tags: [{ bookmarkId: bookmarkB, value: 'Reference' }],
       sequences: [
         { folderId: SYSTEM_ROOT_FOLDER_ID, bookmarkVersion: 2 },
         { folderId: destination, bookmarkVersion: 2 },
@@ -832,8 +928,24 @@ describe('Bookmark Service Interface', () => {
     });
     const snapshot = await service.getSnapshot();
 
-    expect(staleEntity).toMatchObject({ status: 'conflict', code: 'stale_entity', revision: 0 });
-    expect(stale).toMatchObject({ status: 'conflict', code: 'stale_sequence', revision: 0 });
+    expect(staleEntity).toMatchObject({
+      status: 'conflict',
+      code: 'stale_entity',
+      revision: 0,
+      folders: [{ id: second, version: 1 }],
+      bookmarks: [],
+      tags: [],
+      sequences: [],
+    });
+    expect(stale).toMatchObject({
+      status: 'conflict',
+      code: 'stale_sequence',
+      revision: 0,
+      folders: [],
+      bookmarks: [],
+      tags: [],
+      sequences: [{ folderId: SYSTEM_ROOT_FOLDER_ID, folderVersion: 4, bookmarkVersion: 1 }],
+    });
     expect(reordered).toMatchObject({
       status: 'acknowledged',
       folders: [{ id: second }, { id: first }],
@@ -850,6 +962,74 @@ describe('Bookmark Service Interface', () => {
           .map((folder) => folder.rank),
       ).size,
     ).toBe(2);
+  });
+
+  it('returns only affected Bookmark records and Tags on rebalances and conflicts', async () => {
+    const ids = Array.from({ length: 3 }, () => crypto.randomUUID()).sort();
+    const [first, moving, unrelated] = ids as [string, string, string];
+    const folderId = crypto.randomUUID();
+    const service = createBookmarkService(database, {
+      now: () => new Date(now),
+      randomUUID: () => folderId,
+    });
+    await service.executeCommand({
+      type: 'createFolder',
+      operationId: crypto.randomUUID(),
+      parentId: SYSTEM_ROOT_FOLDER_ID,
+      expectedFolderSequenceVersion: 1,
+      name: 'Unrelated Folder',
+    });
+    await database.batch(
+      ids.flatMap((id, index) => [
+        database
+          .prepare(
+            `INSERT INTO bookmarks (id, folder_id, url, title, rank, created_at, modified_at)
+             VALUES (?, ?, 'https://example.com', ?, ?, ?, ?)`,
+          )
+          .bind(
+            id,
+            id === unrelated ? folderId : SYSTEM_ROOT_FOLDER_ID,
+            `Bookmark ${index}`,
+            String(index),
+            now,
+            now,
+          ),
+        database
+          .prepare('INSERT INTO bookmark_tags VALUES (?, ?, ?)')
+          .bind(id, `Tag ${index}`, `tag ${index}`),
+      ]),
+    );
+    const command = {
+      type: 'reorderBookmark' as const,
+      operationId: crypto.randomUUID(),
+      bookmarkId: moving,
+      bookmarkVersion: 1,
+      folderId: SYSTEM_ROOT_FOLDER_ID,
+      expectedBookmarkSequenceVersion: 1,
+      beforeBookmarkId: first,
+    };
+    const result = await service.executeCommand(command);
+    expect(result).toMatchObject({
+      status: 'acknowledged',
+      bookmarks: [
+        { id: moving, version: 2 },
+        { id: first, version: 1 },
+      ],
+      tags: [
+        { bookmarkId: first, value: 'Tag 0' },
+        { bookmarkId: moving, value: 'Tag 1' },
+      ],
+    });
+    const stale = await service.executeCommand({ ...command, operationId: crypto.randomUUID() });
+    expect(stale).toMatchObject({
+      status: 'conflict',
+      code: 'stale_entity',
+      revision: 2,
+      folders: [],
+      bookmarks: result.bookmarks.slice(0, 1),
+      tags: [{ bookmarkId: moving, value: 'Tag 1' }],
+      sequences: [],
+    });
   });
 
   it('trashes one complete Folder subtree as one root and restores its original placement', async () => {
@@ -1135,6 +1315,96 @@ describe('Bookmark Service Interface', () => {
       expectedRevision: before.revision,
     });
     expect((await setup.getTrash()).roots).toEqual([]);
+  });
+
+  it('purges a large Folder tree and empties many Trash roots within the bind limit', async () => {
+    const root = crypto.randomUUID();
+    const children = Array.from({ length: 101 }, () => crypto.randomUUID());
+    const nestedBookmarks = children.map(() => crypto.randomUUID());
+    const remainingRoots = children.map(() => crypto.randomUUID());
+    const independentBookmark = crypto.randomUUID();
+    const trashedFolder = (id: string, parentId: string, index: number, trashRoot: string | null) =>
+      database
+        .prepare(
+          `INSERT INTO bookmark_folders (
+             id, name, parent_id, rank, created_at, modified_at, trashed_at, trash_root_id,
+             original_parent_id, original_rank
+           ) VALUES (?, ?, ?, 'a', ?, ?, ?, ?, ?, 'a')`,
+        )
+        .bind(
+          id,
+          `Folder ${index}`,
+          parentId,
+          now,
+          now,
+          trashRoot ? null : now,
+          trashRoot,
+          trashRoot ? null : parentId,
+        );
+    const trashedBookmark = (id: string, folderId: string, trashRoot: string | null) =>
+      database
+        .prepare(
+          `INSERT INTO bookmarks (
+             id, folder_id, url, title, rank, created_at, modified_at, trashed_at, trash_root_id,
+             original_folder_id, original_rank
+           ) VALUES (?, ?, 'https://example.com', 'Bookmark', 'a', ?, ?, ?, ?, ?, 'a')`,
+        )
+        .bind(
+          id,
+          folderId,
+          now,
+          now,
+          trashRoot ? null : now,
+          trashRoot,
+          trashRoot ? null : folderId,
+        );
+    await database.batch([
+      trashedFolder(root, SYSTEM_ROOT_FOLDER_ID, -1, null),
+      ...children.map((id, index) => trashedFolder(id, root, index, root)),
+      ...nestedBookmarks.map((id, index) => trashedBookmark(id, children[index]!, root)),
+      ...remainingRoots.map((id, index) => trashedFolder(id, SYSTEM_ROOT_FOLDER_ID, index, null)),
+      trashedBookmark(independentBookmark, children[0]!, null),
+    ]);
+    const prepared = vi.spyOn(database, 'prepare');
+    try {
+      const service = createBookmarkService(database, { now: () => new Date(now) });
+      const purged = await service.executeCommand({
+        type: 'purgeTrash',
+        operationId: crypto.randomUUID(),
+        rootKind: 'folder',
+        rootId: root,
+        rootVersion: 1,
+      });
+      expect(purged).toMatchObject({
+        status: 'acknowledged',
+        deletedFolderIds: [...children].sort().concat(root),
+        deletedBookmarkIds: [...nestedBookmarks].sort(),
+      });
+      expect((await service.getTrash()).roots).toContainEqual(
+        expect.objectContaining({
+          id: independentBookmark,
+          originalParentId: SYSTEM_ROOT_FOLDER_ID,
+        }),
+      );
+      const emptied = await service.executeCommand({
+        type: 'emptyTrash',
+        operationId: crypto.randomUUID(),
+        expectedRevision: purged.revision,
+      });
+      expect(emptied).toMatchObject({
+        status: 'acknowledged',
+        deletedFolderIds: [...remainingRoots].sort(),
+        deletedBookmarkIds: [independentBookmark],
+      });
+      expect((await service.getTrash()).roots).toEqual([]);
+      const deletes = prepared.mock.calls
+        .map(([sql]) => sql)
+        .filter((sql) => /^DELETE FROM (bookmarks|bookmark_folders) WHERE/.test(sql));
+      expect(deletes).toHaveLength(7);
+      expect(deletes.every((sql) => (sql.match(/\?/g)?.length ?? 0) <= 100)).toBe(true);
+    } finally {
+      prepared.mockRestore();
+    }
   });
 
   it('keeps an independently trashed child root when its former parent is restored or purged', async () => {

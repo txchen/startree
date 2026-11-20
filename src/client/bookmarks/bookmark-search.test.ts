@@ -186,7 +186,7 @@ describe('Bookmark search Adapter Interface', () => {
       },
     ]);
     await expect(
-      search.search('needle', { tags: [], domains: ['notes.example'] }),
+      search.search('needle', { tags: [], domains: ['NOTES.EXAMPLE'] }),
     ).resolves.toMatchObject([
       {
         kind: 'bookmark',

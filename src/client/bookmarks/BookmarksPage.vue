@@ -34,7 +34,7 @@ import {
   duplicateBookmarkGroups,
   recursiveBookmarkCountsByFolder,
 } from './bookmark-library';
-import { byRank, createBookmarkState, type BookmarkStateView } from './bookmark-state';
+import { createBookmarkState, type BookmarkStateView } from './bookmark-state';
 import { trapDialogFocus } from './dialog-focus';
 import FolderNavigation from './FolderNavigation.vue';
 
@@ -85,6 +85,7 @@ const stateModule = createBookmarkState({
   revisionChannel: createBroadcastBookmarkRevisionChannel(),
 });
 const state = shallowRef<BookmarkStateView>(stateModule.getState());
+const library = shallowRef(state.value);
 let unsubscribe: (() => void) | undefined;
 let desktopMedia: MediaQueryList | undefined;
 const updateDesktopEditing = () => {
@@ -147,7 +148,7 @@ const pinWritable = computed(
   () => state.value.syncStatus !== 'offline' && state.value.writeStatus !== 'pending',
 );
 const pinnedBookmarks = computed(() =>
-  state.value.bookmarks
+  library.value.bookmarks
     .filter((bookmark) => bookmark.pinRank)
     .sort((left, right) =>
       left.pinRank! < right.pinRank!
@@ -162,9 +163,8 @@ const recentIds = shallowRef<string[]>([]);
 const recentChannel = new BroadcastChannel('startree-recent-bookmarks');
 let recentDisposed = false;
 const recentBookmarks = computed(() => {
-  const bookmarks = new Map(state.value.bookmarks.map((bookmark) => [bookmark.id, bookmark]));
   return recentIds.value.flatMap((id) => {
-    const bookmark = bookmarks.get(id);
+    const bookmark = library.value.bookmarksById.get(id);
     return bookmark ? [bookmark] : [];
   });
 });
@@ -212,30 +212,33 @@ const selectedResultId = computed(() =>
     : undefined,
 );
 
-const folderPaths = computed(() => bookmarkFolderPaths(state.value.folders));
+const folderPaths = computed(() => bookmarkFolderPaths(library.value.folders));
 const folderPathFor = (folderId: string): string => folderPaths.value[folderId] ?? 'Bookmarks';
 
 const libraryFacets = computed(() =>
-  bookmarkFacetsFor(state.value.bookmarks, state.value.tagsByBookmark),
+  bookmarkFacetsFor(library.value.bookmarks, library.value.tagsByBookmark),
 );
 const folderBookmarkCounts = computed(() =>
-  recursiveBookmarkCountsByFolder(state.value.folders, state.value.bookmarks),
+  recursiveBookmarkCountsByFolder(library.value.folders, library.value.bookmarks),
 );
-const duplicateGroups = computed(() => duplicateBookmarkGroups(state.value.bookmarks));
-const duplicateLocations = computed<Readonly<Record<string, string>>>(() =>
-  Object.fromEntries(
-    state.value.bookmarks.map((bookmark) => [bookmark.id, folderPathFor(bookmark.folderId)]),
-  ),
-);
+const duplicateGroups = computed(() => duplicateBookmarkGroups(library.value.bookmarks));
 const editorDuplicateBookmarks = computed(() => {
   if (editor.value?.kind !== 'bookmark') return [];
   return bookmarksMatchingUrl(
-    state.value.bookmarks,
+    library.value.bookmarks,
     editorDraft.value.url ?? '',
     editor.value.bookmark?.id,
   );
 });
 
+const duplicateLocations = computed<Readonly<Record<string, string>>>(() =>
+  Object.fromEntries(
+    editorDuplicateBookmarks.value.map((bookmark) => [
+      bookmark.id,
+      folderPathFor(bookmark.folderId),
+    ]),
+  ),
+);
 const openDrawer = () => {
   drawerOpen.value = true;
   void nextTick(() => drawerCloseButton.value?.focus());
@@ -393,7 +396,7 @@ const sequenceFor = (folderId: string) =>
   state.value.sequences.find((sequence) => sequence.folderId === folderId);
 
 const reorderFolder = async (folderId: string, beforeFolderId?: string) => {
-  const folder = state.value.folders.find((item) => item.id === folderId);
+  const folder = library.value.foldersById.get(folderId);
   if (!folder?.parentId || folder.id === beforeFolderId) return null;
   const sequence = sequenceFor(folder.parentId);
   if (!sequence) return null;
@@ -409,7 +412,7 @@ const reorderFolder = async (folderId: string, beforeFolderId?: string) => {
 };
 
 const reorderBookmark = async (bookmarkId: string, beforeBookmarkId?: string) => {
-  const bookmark = state.value.bookmarks.find((item) => item.id === bookmarkId);
+  const bookmark = library.value.bookmarksById.get(bookmarkId);
   if (!bookmark || bookmark.id === beforeBookmarkId) return null;
   const sequence = sequenceFor(bookmark.folderId);
   if (!sequence) return null;
@@ -483,16 +486,16 @@ const closeMoveEditor = () => {
 };
 
 const folderIsWithin = (candidateId: string, ancestorId: string): boolean => {
-  let cursor = state.value.folders.find((folder) => folder.id === candidateId);
+  let cursor = library.value.foldersById.get(candidateId);
   while (cursor?.parentId) {
     if (cursor.parentId === ancestorId) return true;
-    cursor = state.value.folders.find((folder) => folder.id === cursor?.parentId);
+    cursor = library.value.foldersById.get(cursor.parentId);
   }
   return false;
 };
 
 const executeFolderMove = async (folderId: string) => {
-  const folder = state.value.folders.find((item) => item.id === folderId);
+  const folder = library.value.foldersById.get(folderId);
   if (!folder?.parentId) return null;
   if (folder.parentId === moveDestinationId.value) {
     return reorderFolder(folderId, moveBeforeId.value || undefined);
@@ -514,7 +517,7 @@ const executeFolderMove = async (folderId: string) => {
 };
 
 const executeBookmarkMove = async (bookmarkId: string) => {
-  const bookmark = state.value.bookmarks.find((item) => item.id === bookmarkId);
+  const bookmark = library.value.bookmarksById.get(bookmarkId);
   if (!bookmark) return null;
   if (bookmark.folderId === moveDestinationId.value) {
     return reorderBookmark(bookmarkId, moveBeforeId.value || undefined);
@@ -541,24 +544,20 @@ const moveEditorModel = computed(() => {
   if (active.kind === 'folder') {
     return {
       noun: 'Folder',
-      destinations: state.value.folders.filter(
+      destinations: library.value.folders.filter(
         (folder) => folder.id !== active.id && !folderIsWithin(folder.id, active.id),
       ),
-      positions: state.value.folders
-        .filter((folder) => folder.parentId === moveDestinationId.value && folder.id !== active.id)
-        .sort(byRank)
+      positions: (library.value.foldersByParent.get(moveDestinationId.value) ?? [])
+        .filter((folder) => folder.id !== active.id)
         .map((folder) => ({ id: folder.id, label: folder.name })),
       execute: () => executeFolderMove(active.id),
     };
   }
   return {
     noun: 'Bookmark',
-    destinations: state.value.folders,
-    positions: state.value.bookmarks
-      .filter(
-        (bookmark) => bookmark.folderId === moveDestinationId.value && bookmark.id !== active.id,
-      )
-      .sort(byRank)
+    destinations: library.value.folders,
+    positions: (library.value.bookmarksByFolder.get(moveDestinationId.value) ?? [])
+      .filter((bookmark) => bookmark.id !== active.id)
       .map((bookmark) => ({ id: bookmark.id, label: bookmark.title })),
     execute: () => executeBookmarkMove(active.id),
   };
@@ -799,7 +798,7 @@ const trashEntries = computed(() =>
 );
 
 const restoreTrashRoot = async (root: BookmarkTrashRoot) => {
-  const activeParent = state.value.folders.some((folder) => folder.id === root.originalParentId)
+  const activeParent = library.value.foldersById.has(root.originalParentId)
     ? root.originalParentId
     : SYSTEM_ROOT_FOLDER_ID;
   const sequence = sequenceFor(activeParent);
@@ -872,6 +871,7 @@ onMounted(async () => {
   const folderId = props.legacyFolderId;
   unsubscribe = stateModule.subscribe((replacement) => {
     state.value = replacement;
+    if (replacement.tagsByBookmark !== library.value.tagsByBookmark) library.value = replacement;
     if (!initialized.value && replacement.status !== 'loading') {
       initialized.value = true;
     }
@@ -922,7 +922,7 @@ onUnmounted(() => {
         <h2>Folders</h2>
       </div>
       <FolderNavigation
-        :folders="state.folders"
+        :children-by-parent="state.foldersByParent"
         :selected-folder-id="state.selectedFolder?.id"
         :expanded-folder-ids="state.expandedFolderIds"
         :bookmark-counts="folderBookmarkCounts"
@@ -1499,7 +1499,7 @@ onUnmounted(() => {
           </button>
         </div>
         <FolderNavigation
-          :folders="state.folders"
+          :children-by-parent="state.foldersByParent"
           :selected-folder-id="state.selectedFolder?.id"
           :expanded-folder-ids="state.expandedFolderIds"
           :bookmark-counts="folderBookmarkCounts"

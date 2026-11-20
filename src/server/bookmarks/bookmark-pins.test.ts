@@ -68,7 +68,10 @@ describe('Pinned Bookmarks', () => {
   it('pins, reorders, and unpins without changing Bookmark content or Folder ordering', async () => {
     const initial = await service.getSnapshot();
     const first = await pin(0);
-    expect(first.status).toBe('acknowledged');
+    expect(first).toMatchObject({
+      status: 'acknowledged',
+      bookmarks: [{ id: ids[0], note: 'Keep this note', version: 1 }],
+    });
     expect(first.tags).toEqual([{ bookmarkId: ids[0], value: 'Reference' }]);
     await pin(1);
     await pin(2);
@@ -208,7 +211,15 @@ describe('Pinned Bookmarks', () => {
       .bind('0', ids[0])
       .all();
     const before = await service.getSnapshot();
-    expect(await pin(1, true, ids[0])).toMatchObject({ status: 'acknowledged' });
+    const result = await pin(1, true, ids[0]);
+    expect(result).toMatchObject({ status: 'acknowledged' });
+    expect(result.bookmarks.map((bookmark) => bookmark.id).sort()).toEqual(ids.slice(0, 2).sort());
+    expect(result.tags).toEqual(
+      ids
+        .slice(0, 2)
+        .sort()
+        .map((bookmarkId) => ({ bookmarkId, value: 'Reference' })),
+    );
     expect(await pinnedIds()).toEqual([ids[1], ids[0]]);
     expect((await service.getSnapshot()).bookmarks.map((bookmark) => bookmark.rank)).toEqual(
       before.bookmarks.map((bookmark) => bookmark.rank),

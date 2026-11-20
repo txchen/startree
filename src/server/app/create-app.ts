@@ -3,11 +3,9 @@ import { Hono } from 'hono';
 import * as v from 'valibot';
 
 import {
-  bookmarkCommandResultSchema,
   bookmarkCommandSchema,
   bookmarkSnapshotEtag,
   bookmarkTrashEtag,
-  bookmarkTrashSchema,
   type BookmarkCommand,
   type BookmarkCommandResult,
   type BookmarkSnapshot,
@@ -88,7 +86,7 @@ export const createApp = <Bindings extends CoreBindings>(services: AppServices<B
   });
 
   app.get('/api/bookmarks/trash', async (context) => {
-    const trash = v.parse(bookmarkTrashSchema, await services.readBookmarkTrash(context.env));
+    const trash = await services.readBookmarkTrash(context.env);
     const etag = bookmarkTrashEtag(trash.revision);
     context.header('ETag', etag);
     if (context.req.header('If-None-Match') === etag) return context.body(null, 304);
@@ -186,10 +184,7 @@ export const createApp = <Bindings extends CoreBindings>(services: AppServices<B
 
     let result: BookmarkCommandResult;
     try {
-      result = v.parse(
-        bookmarkCommandResultSchema,
-        await services.executeBookmarkCommand(parsedCommand.output, context.env),
-      );
+      result = await services.executeBookmarkCommand(parsedCommand.output, context.env);
     } catch (error) {
       console.error(
         JSON.stringify({

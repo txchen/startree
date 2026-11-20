@@ -111,8 +111,9 @@ const activeFolderDetails = (snapshot: BookmarkSnapshot): Map<string, ActiveFold
   const foldersByParent = new Map<string, typeof snapshot.folders>();
   for (const folder of snapshot.folders) {
     if (folder.parentId === null) continue;
-    const siblings = foldersByParent.get(folder.parentId) ?? [];
-    foldersByParent.set(folder.parentId, [...siblings, folder]);
+    const siblings = foldersByParent.get(folder.parentId);
+    if (siblings) siblings.push(folder);
+    else foldersByParent.set(folder.parentId, [folder]);
   }
 
   const details = new Map<string, ActiveFolderDetails>([
@@ -121,10 +122,9 @@ const activeFolderDetails = (snapshot: BookmarkSnapshot): Map<string, ActiveFold
       { path: 'Bookmarks', scopeFolderIds: [], bookmarkScopeFolderIds: [SYSTEM_ROOT_FOLDER_ID] },
     ],
   ]);
-  const pending = [SYSTEM_ROOT_FOLDER_ID];
-  while (pending.length) {
-    const parentId = pending.shift();
-    if (!parentId) continue;
+  const pending: string[] = [SYSTEM_ROOT_FOLDER_ID];
+  for (let cursor = 0; cursor < pending.length; cursor += 1) {
+    const parentId = pending[cursor]!;
     const parentDetails = details.get(parentId);
     if (!parentDetails) continue;
     for (const child of foldersByParent.get(parentId) ?? []) {
@@ -278,19 +278,17 @@ type FilterableSearchDocument = Readonly<{
 
 const matchesFilters = (
   document: FilterableSearchDocument,
-  filters: BookmarkSearchFilters,
+  filters: { tags: readonly string[]; domains: ReadonlySet<string> },
   scopeFolderId: string | null,
 ): boolean => {
   if (scopeFolderId && !document.scopeFolderIds.includes(scopeFolderId)) return false;
-  if (!bookmarkSearchFiltersActive(filters)) return true;
+  if (!filters.tags.length && !filters.domains.size) return true;
   if (document.kind !== 'bookmark' || !document.url) return false;
-  const normalizedTags = new Set((document.tags ?? []).map((tag) => tag.toLocaleLowerCase()));
-  const tagMatch =
-    filters.tags.length === 0 ||
-    filters.tags.every((tag) => normalizedTags.has(tag.toLocaleLowerCase()));
-  const domainMatch =
-    filters.domains.length === 0 || filters.domains.includes(bookmarkDomain(document.url));
-  return tagMatch && domainMatch;
+  if (filters.tags.length) {
+    const documentTags = new Set(document.tags?.map((tag) => tag.toLocaleLowerCase()));
+    if (!filters.tags.every((tag) => documentTags.has(tag))) return false;
+  }
+  return !filters.domains.size || filters.domains.has(bookmarkDomain(document.url));
 };
 
 export const createMiniSearchBookmarkAdapter = (): BookmarkSearchAdapter => {
@@ -309,11 +307,15 @@ export const createMiniSearchBookmarkAdapter = (): BookmarkSearchAdapter => {
     },
     async search(query, filters = EMPTY_BOOKMARK_SEARCH_FILTERS, scopeFolderId = null) {
       const normalized = query.trim();
+      const normalizedFilters = {
+        tags: filters.tags.map((tag) => tag.toLocaleLowerCase()),
+        domains: new Set(filters.domains.map((domain) => domain.toLowerCase())),
+      };
       const results: BookmarkSearchResult[] = [];
       if (!normalized) {
         if (!bookmarkSearchFiltersActive(filters)) return results;
         for (const document of documents) {
-          if (!matchesFilters(document, filters, scopeFolderId)) continue;
+          if (!matchesFilters(document, normalizedFilters, scopeFolderId)) continue;
           results.push(resultFromDocument(document));
           if (results.length === BOOKMARK_SEARCH_RESULT_LIMIT) break;
         }
@@ -321,7 +323,7 @@ export const createMiniSearchBookmarkAdapter = (): BookmarkSearchAdapter => {
       }
       for (const match of index.search(normalized)) {
         const document = documents[Number(match.id)];
-        if (!document || !matchesFilters(document, filters, scopeFolderId)) continue;
+        if (!document || !matchesFilters(document, normalizedFilters, scopeFolderId)) continue;
         results.push(resultFromDocument(document, match));
         if (results.length === BOOKMARK_SEARCH_RESULT_LIMIT) break;
       }

@@ -179,6 +179,30 @@ describe('Bookmark state Module Interface', () => {
     );
   });
 
+  it('reuses snapshot indexes and sorted children across search and navigation emissions', async () => {
+    const state = createBookmarkState({
+      remote: createMemoryBookmarkRemoteAdapter(snapshot()),
+      storage: createMemoryBookmarkStorageAdapter(),
+      search: createMiniSearchBookmarkAdapter(),
+    });
+    try {
+      await state.initialize({ folderId });
+      const initial = state.getState();
+      await state.search('Reference');
+      await state.toggleFolderExpanded(folderId);
+      const after = state.getState();
+      expect(after.directBookmarks).toBe(initial.directBookmarks);
+      expect(after.directFolders).toBe(initial.directFolders);
+      expect(after.tagsByBookmark).toBe(initial.tagsByBookmark);
+      expect(after.foldersByParent.get(folderId)).toBe(initial.directFolders);
+      expect(after.bookmarksById.get(initial.directBookmarks[0]!.id)).toBe(
+        initial.directBookmarks[0],
+      );
+    } finally {
+      state.dispose();
+    }
+  });
+
   it('makes a cold snapshot browsable before search indexing finishes', async () => {
     let finishIndexing = () => {};
     const indexing = new Promise<void>((resolve) => {
@@ -247,8 +271,9 @@ describe('Bookmark state Module Interface', () => {
     state.dispose();
   });
 
-  it('removes a trashed Bookmark optimistically and loads Trash only while online', async () => {
+  it('keeps Trash unloaded until requested while updating the active library and search', async () => {
     const remote = createMemoryBookmarkRemoteAdapter(snapshot());
+    const readTrash = vi.spyOn(remote, 'readTrash');
     const bookmark = snapshot().bookmarks[1]!;
     remote.setTrash({
       wireFormatVersion: 1,
@@ -298,10 +323,15 @@ describe('Bookmark state Module Interface', () => {
     expect(state.getState().directBookmarks.map((item) => item.id)).not.toContain(bookmark.id);
     await state.search('Now Bookmark');
     expect(state.getState().searchResults.map((result) => result.id)).not.toContain(bookmark.id);
+    expect(state.getState().trash).toBeNull();
+    expect(readTrash).not.toHaveBeenCalled();
+    await state.loadTrash();
+    expect(readTrash).toHaveBeenCalledOnce();
     expect(state.getState().trash?.roots).toEqual([expect.objectContaining({ id: bookmark.id })]);
     lifecycle.setOnline(false);
     await state.loadTrash();
     expect(state.getState()).toMatchObject({ trash: null, trashStatus: 'offline' });
+    expect(readTrash).toHaveBeenCalledOnce();
     state.dispose();
   });
 

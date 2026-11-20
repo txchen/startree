@@ -2,15 +2,14 @@
 import { computed } from 'vue';
 
 import type { BookmarkFolder } from '../../shared/bookmarks/contracts';
-import { byRank } from './bookmark-state';
 
 defineOptions({ name: 'FolderTree' });
 
 const props = defineProps<{
-  folders: readonly BookmarkFolder[];
+  childrenByParent: ReadonlyMap<string, readonly BookmarkFolder[]>;
   parentId: string;
   selectedFolderId?: string;
-  expandedFolderIds: readonly string[];
+  expandedFolders: ReadonlySet<string>;
   bookmarkCounts: Readonly<Record<string, number>>;
 }>();
 
@@ -19,12 +18,7 @@ const emit = defineEmits<{
   toggle: [folderId: string];
 }>();
 
-const children = computed(() =>
-  props.folders.filter((folder) => folder.parentId === props.parentId).sort(byRank),
-);
-
-const hasChildren = (folderId: string) =>
-  props.folders.some((folder) => folder.parentId === folderId);
+const children = computed(() => props.childrenByParent.get(props.parentId) ?? []);
 
 const countLabel = (folderId: string) => {
   const count = props.bookmarkCounts[folderId] ?? 0;
@@ -37,14 +31,14 @@ const countLabel = (folderId: string) => {
     <li v-for="folder in children" :key="folder.id">
       <div class="folder-tree-row" :class="{ selected: folder.id === selectedFolderId }">
         <button
-          v-if="hasChildren(folder.id)"
+          v-if="childrenByParent.has(folder.id)"
           class="tree-toggle"
           type="button"
-          :aria-label="`${expandedFolderIds.includes(folder.id) ? 'Collapse' : 'Expand'} ${folder.name}`"
-          :aria-expanded="expandedFolderIds.includes(folder.id)"
+          :aria-label="`${expandedFolders.has(folder.id) ? 'Collapse' : 'Expand'} ${folder.name}`"
+          :aria-expanded="expandedFolders.has(folder.id)"
           @click="emit('toggle', folder.id)"
         >
-          {{ expandedFolderIds.includes(folder.id) ? '−' : '+' }}
+          {{ expandedFolders.has(folder.id) ? '−' : '+' }}
         </button>
         <span v-else class="tree-spacer" aria-hidden="true"></span>
         <button
@@ -61,11 +55,11 @@ const countLabel = (folderId: string) => {
         </button>
       </div>
       <FolderTree
-        v-if="expandedFolderIds.includes(folder.id)"
-        :folders="folders"
+        v-if="expandedFolders.has(folder.id)"
+        :children-by-parent="childrenByParent"
         :parent-id="folder.id"
         :selected-folder-id="selectedFolderId"
-        :expanded-folder-ids="expandedFolderIds"
+        :expanded-folders="expandedFolders"
         :bookmark-counts="bookmarkCounts"
         @select="emit('select', $event)"
         @toggle="emit('toggle', $event)"
